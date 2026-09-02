@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  inspectiq-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: inspectiq-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - inspectiq-backend
+    restart: unless-stopped
+
+  inspectiq-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: inspectiq-backend
+    ports:
+      - "8000:8000"
+    restart: unless-stopped

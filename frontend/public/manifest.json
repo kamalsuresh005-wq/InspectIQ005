@@ -1,0 +1,17 @@
+{
+  "short_name": "InspectIQ",
+  "name": "InspectIQ - Legal Metrology Field Inspection",
+  "description": "AI-assisted field inspection and compliance verification for packaged commodities under Legal Metrology Rules, 2011",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#1E3A8A",
+  "theme_color": "#1E3A8A",
+  "display": "standalone",
+  "orientation": "portrait"
+}

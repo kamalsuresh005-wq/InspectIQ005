@@ -1,0 +1,168 @@
+import { LegalRule } from '../types';
+
+export const LEGAL_RULES_DATABASE: LegalRule[] = [
+  {
+    ruleId: 'RULE-6-1-A',
+    ruleNumber: 'Rule 6(1)(a)',
+    title: 'Name & Address of Manufacturer / Packer / Importer',
+    requirement: 'Every package shall bear the complete legal name and verified physical address of the manufacturer or packer, or in case of imported goods, the importer with registered office details.',
+    appliesWhen: 'All pre-packaged commodities sold, distributed, or delivered in India.',
+    exception: 'Where manufacturer and packer are distinct, both must be mentioned, or "Manufactured by... for...".',
+    effectiveFrom: '01-04-2011',
+    status: 'Active',
+    sectionRef: 'Section 18 & 36(1) of Legal Metrology Act, 2009',
+    category: 'Mandatory Declarations',
+    penaltyText: 'Fine up to ₹25,000 for first offence, ₹50,000 for second offence, and up to ₹1,00,000 or imprisonment up to 1 year for subsequent offences under Section 36(1).'
+  },
+  {
+    ruleId: 'RULE-6-1-B',
+    ruleNumber: 'Rule 6(1)(b)',
+    title: 'Generic or Common Name of Commodity',
+    requirement: 'The common or generic name of the commodity contained in the package shall be prominently displayed on the Principal Display Panel.',
+    appliesWhen: 'All pre-packaged commodities.',
+    exception: 'When product name is self-describing through transparent wrapping without branding ambiguity.',
+    effectiveFrom: '01-04-2011',
+    status: 'Active',
+    sectionRef: 'Section 18 of Legal Metrology Act, 2009',
+    category: 'Mandatory Declarations',
+    penaltyText: 'Compoundable fine up to ₹25,000 under Section 36(1) read with Section 48.'
+  },
+  {
+    ruleId: 'RULE-6-1-C',
+    ruleNumber: 'Rule 6(1)(c)',
+    title: 'Net Quantity Declaration in Standard Units',
+    requirement: 'Net quantity shall be stated in terms of standard unit of weight or measure (g, kg, ml, L) or number, complying with permissible maximum error limits under the First Schedule.',
+    appliesWhen: 'All pre-packaged commodities regardless of weight category.',
+    exception: 'Packages containing commodities less than 10g/10ml or more than 25kg/25L for industrial consumers (except cement and fertilizer).',
+    effectiveFrom: '01-04-2011',
+    status: 'Active',
+    sectionRef: 'Section 18 & Section 36(2) of Legal Metrology Act, 2009',
+    category: 'Net Quantity',
+    penaltyText: 'Section 36(2) - For non-standard quantity, fine up to ₹50,000 for first offence and ₹1,00,000 or imprisonment for subsequent.'
+  },
+  {
+    ruleId: 'RULE-6-1-D',
+    ruleNumber: 'Rule 6(1)(d)',
+    title: 'Month and Year of Manufacture / Packing / Import',
+    requirement: 'Every package shall bear the month and year in which the commodity is manufactured, packed or imported in unambiguous format (e.g. MM/YYYY or Month Year).',
+    appliesWhen: 'All pre-packaged commodities.',
+    exception: 'Not applicable for packages containing uncanned vegetables, fruits, or ice cream loose packs.',
+    effectiveFrom: '01-04-2011',
+    status: 'Active',
+    sectionRef: 'Section 18 of Legal Metrology Act, 2009',
+    category: 'Mandatory Declarations',
+    penaltyText: 'Violation attracts fine up to ₹25,000 for first offence under Section 36.'
+  },
+  {
+    ruleId: 'RULE-6-1-E',
+    ruleNumber: 'Rule 6(1)(e)',
+    title: 'Maximum Retail Price (MRP) & Unit Sale Price (USP)',
+    requirement: 'Retail sale price shall be clearly marked as "Maximum or Max. Retail Price ₹... (inclusive of all taxes)" or "MRP ₹... incl. of all taxes". Unit Sale Price (USP) per g/ml/piece is mandatory for packages containing > 1 unit/kg.',
+    appliesWhen: 'All commodities packaged for retail trade.',
+    exception: 'No extra charges over MRP permitted under any circumstances.',
+    effectiveFrom: '01-04-2011',
+    status: 'Active',
+    sectionRef: 'Section 18 & 36(1) of Legal Metrology Act, 2009',
+    category: 'MRP & Unit Price',
+    penaltyText: 'Overcharging or improper MRP format attracts fine up to ₹25,000 (first) and ₹50,000 (repeat) under Section 36(1).'
+  },
+  {
+    ruleId: 'RULE-6-1-F',
+    ruleNumber: 'Rule 6(1)(f)',
+    title: 'Size and Dimensions of the Commodity',
+    requirement: 'Where the commodity is sold by dimensions (length, breadth, area, thickness, diameter), precise measurement units (cm, m, mm) must be declared on the package.',
+    appliesWhen: 'Commodities sold by dimensions like bedsheets, wires, textiles, aluminium foils.',
+    exception: 'Not applicable to items sold purely by net weight or volume.',
+    effectiveFrom: '01-04-2011',
+    status: 'Active',
+    sectionRef: 'Section 18 of Legal Metrology Act, 2009',
+    category: 'Mandatory Declarations',
+    penaltyText: 'Fine up to ₹25,000 under Section 36(1).'
+  },
+  {
+    ruleId: 'RULE-6-10',
+    ruleNumber: 'Rule 6(10)',
+    title: 'Mandatory E-Commerce Marketplace Declarations',
+    requirement: 'An e-commerce entity shall ensure that the mandatory declarations under sub-rule (1) including MRP, Net Quantity, Country of Origin, Manufacturer, and Expiry are displayed on the digital product listing page before purchase.',
+    appliesWhen: 'All e-commerce entities, marketplaces, inventory-based models, and quick-commerce apps operating in India.',
+    exception: 'None for retail consumers.',
+    effectiveFrom: '01-01-2018',
+    status: 'Active',
+    sectionRef: 'Rule 6(10) PCR 2011 & Section 18 LM Act 2009',
+    category: 'E-commerce',
+    penaltyText: 'Notice under Section 36(1) and liability on marketplace intermediaries under Rule 6(10).'
+  },
+  {
+    ruleId: 'RULE-6-11',
+    ruleNumber: 'Rule 6(11)',
+    title: 'Unit Sale Price (USP) Display Mandate',
+    requirement: 'The unit sale price in Rupees (e.g. ₹0.25 per g or ₹250 per kg, ₹1.50 per ml) must be declared on the Principal Display Panel alongside MRP.',
+    appliesWhen: 'All retail packages containing more than 1 kg or 1 Litre or multiple units.',
+    exception: 'Packages containing net quantity equal to 100g, 1kg, 100ml, 1L, or 1 piece do not mandate separate USP if MRP is identical to unit price.',
+    effectiveFrom: '01-12-2022',
+    status: 'Active',
+    sectionRef: 'Rule 6(11) PCR Amendment 2022',
+    category: 'MRP & Unit Price',
+    penaltyText: 'Compoundable fine up to ₹25,000 for first violation.'
+  },
+  {
+    ruleId: 'RULE-5',
+    ruleNumber: 'Rule 5 & Table I/II',
+    title: 'Minimum Height of Numerals & Letters (Font Size)',
+    requirement: 'The height of letters and numerals for declarations of Net Quantity and MRP shall not be less than the minimum statutory height based on Principal Display Panel (PDP) area (Table I/II: e.g. PDP ≤ 50 cm²: min 1.0mm; 50-100 cm²: min 1.5mm; 100-500 cm²: min 2.0mm; 500-2500 cm²: min 4.0mm; > 2500 cm²: min 6.0mm).',
+    appliesWhen: 'All Principal Display Panels.',
+    exception: 'Embossed or perforated characters require 1mm additional height.',
+    effectiveFrom: '01-04-2011',
+    status: 'Active',
+    sectionRef: 'Rule 5 & 7 of PCR, 2011',
+    category: 'Font & Numerals',
+    penaltyText: 'Violation classified as illegible declaration, attracting Section 36 penalty.'
+  },
+  {
+    ruleId: 'RULE-9',
+    ruleNumber: 'Rule 9',
+    title: 'Consumer Redressal & Care Contact Details',
+    requirement: 'Every package shall contain verified consumer care details including the name of the designated person/officer, telephone number, email ID, and full postal address for consumer complaints.',
+    appliesWhen: 'All retail packaged commodities.',
+    exception: 'None.',
+    effectiveFrom: '01-04-2011',
+    status: 'Active',
+    sectionRef: 'Rule 9 PCR 2011 & Section 18 LM Act',
+    category: 'Consumer Redressal',
+    penaltyText: 'Fine up to ₹25,000 under Section 36(1).'
+  },
+  {
+    ruleId: 'RULE-14',
+    ruleNumber: 'Rule 14',
+    title: 'Country of Origin for Imported and Domestic Goods',
+    requirement: 'The name of the Country of Origin or Country of Manufacture/Assembly must be clearly declared on the package and e-commerce listing.',
+    appliesWhen: 'All imported packages and mandatory for domestic goods.',
+    exception: 'None.',
+    effectiveFrom: '01-04-2011',
+    status: 'Active',
+    sectionRef: 'Rule 14 & Rule 6(1)(g) PCR 2011',
+    category: 'Country of Origin',
+    penaltyText: 'Regulatory notice and fine up to ₹25,000 for missing origin declaration.'
+  },
+  {
+    ruleId: 'RULE-7',
+    ruleNumber: 'Rule 7',
+    title: 'Principal Display Panel (PDP) Contrast and Readability',
+    requirement: 'Every declaration shall be legible, prominent, and conspicuous, with sufficient background contrast ratio (minimum 3:1) and unobstructed by background graphics or packaging folds.',
+    appliesWhen: 'All packaged commodities.',
+    exception: 'None.',
+    effectiveFrom: '01-04-2011',
+    status: 'Active',
+    sectionRef: 'Rule 7 of PCR, 2011',
+    category: 'Font & Numerals',
+    penaltyText: 'Warning notice or compoundable fine under Section 36.'
+  }
+];
+
+export const SCHEDULE_TABLE_FONT_SIZES = [
+  { areaMin: 0, areaMax: 50, minHeightNormal: 1.0, minHeightEmbossed: 2.0, weightCondition: 'Net Qty ≤ 50g/ml' },
+  { areaMin: 50, areaMax: 100, minHeightNormal: 1.5, minHeightEmbossed: 2.5, weightCondition: '50g/ml < Net Qty ≤ 200g/ml' },
+  { areaMin: 100, areaMax: 500, minHeightNormal: 2.0, minHeightEmbossed: 3.0, weightCondition: '200g/ml < Net Qty ≤ 1kg/L' },
+  { areaMin: 500, areaMax: 2500, minHeightNormal: 4.0, minHeightEmbossed: 5.0, weightCondition: '1kg/L < Net Qty ≤ 5kg/L' },
+  { areaMin: 2500, areaMax: 10000, minHeightNormal: 6.0, minHeightEmbossed: 7.0, weightCondition: 'Net Qty > 5kg/L' },
+];
