@@ -70,6 +70,30 @@ API Documentation will be live at `http://localhost:8000/docs`.
 
 ---
 
-*SIH26034 • Smart India Hackathon 2026 • Government Legal Metrology Inspection Intelligence*
+## 🌐 1-Click Deployment Guide
 
-# InspectIQ
+### Option 1: Vercel (Instant Cloud Hosting)
+1. Visit [vercel.com/new](https://vercel.com/new).
+2. Import GitHub repository: `kamalsuresh005-wq/InspectIQ005`.
+3. In Project Settings:
+   - **Root Directory:** `frontend`
+   - **Build Command:** `npm run build`
+   - **Output Directory:** `dist`
+4. Click **Deploy**. Vercel will automatically build and assign a free HTTPS domain.
+
+### Option 2: Docker & Docker Compose (Cloud / VPS / On-Premises)
+Run both the frontend and backend microservices with one command:
+```bash
+docker-compose up --build -d
+```
+- **Frontend App:** `http://<server-ip>:3000`
+- **Backend API:** `http://<server-ip>:8000`
+
+### Option 3: Mobile PWA (Field Officers' Smartphones)
+1. Open the deployed HTTPS URL in Google Chrome (Android) or Safari (iOS).
+2. Tap the browser menu `⋮` / Share `⎋` and select **"Install App"** / **"Add to Home Screen"**.
+3. InspectIQ installs with a native app icon and runs fullscreen with hardware camera and GPS integration.
+
+---
+
+*InspectIQ • Smart India Hackathon 2026 • Legal Metrology Field Inspection Intelligence*
