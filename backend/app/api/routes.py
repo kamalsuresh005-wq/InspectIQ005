@@ -1,9 +1,10 @@
 from fastapi import APIRouter, HTTPException
 from ..models.schemas import (
     OcrRequest, OcrResponse, ExtractedField,
-    RuleCheckRequest, RuleCheckResponse,
+    RuleCheckRequest, RuleCheckItem, RuleCheckResponse,
     EcommerceScrapeRequest, EcommerceScrapeResponse
 )
+from ..rules import LegalMetrologyRuleEngine, DeclarationInput
 from ..core.rule_matrix import evaluate_legal_metrology_rules
 
 router = APIRouter(prefix="/api/v1")
@@ -12,10 +13,9 @@ router = APIRouter(prefix="/api/v1")
 async def health_check():
     return {
         "status": "healthy",
-        "service": "Legal Metrology Inspection Intelligence API",
+        "service": "InspectIQ Legal Metrology API",
         "version": "1.0.4",
         "statute": "Legal Metrology Act, 2009 & PCR 2011",
-        "prototype_project": "SIH26034"
     }
 
 @router.post("/ocr/analyze", response_model=OcrResponse)
@@ -96,29 +96,74 @@ async def analyze_ocr(request: OcrRequest):
 
 @router.post("/validate-rules", response_model=RuleCheckResponse)
 async def validate_rules(request: RuleCheckRequest):
-    checks = evaluate_legal_metrology_rules(
-        request.declarations,
-        request.pdp_area_cm2,
-        request.net_quantity
-    )
+    engine = LegalMetrologyRuleEngine()
+    decl_inputs = [
+        DeclarationInput(
+            field_key=d.field_key,
+            field_name=d.field_name,
+            detected_value=d.detected_value,
+            raw_ocr_text=d.raw_ocr_text,
+            extracted_value=d.extracted_value or d.detected_value,
+            officer_verified_value=d.officer_verified_value,
+            applicability_status=d.applicability_status,
+            readability_status=d.readability_status,
+            confidence=d.confidence,
+            status=d.status,
+            rule_ref=d.rule_ref
+        )
+        for d in request.declarations
+    ]
 
-    passed_count = sum(1 for c in checks if c.result == "COMPLIANT")
-    review_count = sum(1 for c in checks if c.result == "REVIEW_REQUIRED")
-    violation_count = sum(1 for c in checks if c.result == "POTENTIAL_NON_COMPLIANCE")
+    context = {
+        "product_name": request.product_name,
+        "category": request.category,
+        "net_quantity": request.net_quantity,
+        "mrp": request.mrp,
+        "pdp_area_cm2": request.pdp_area_cm2
+    }
 
-    overall_status = "Compliant"
-    if violation_count > 0:
-        overall_status = "Potential Non-Compliance"
-    elif review_count > 0:
-        overall_status = "Review Required"
+    engine_result = engine.evaluate_inspection(request.inspection_id, decl_inputs, context)
+
+    check_items = []
+    for f in engine_result.findings:
+        result_compat = "COMPLIANT"
+        if f.status == "POTENTIAL_NON_COMPLIANCE":
+            result_compat = "POTENTIAL_NON_COMPLIANCE"
+        elif f.status in ("REQUIRES_OFFICER_REVIEW", "NOT_DETECTED"):
+            result_compat = "REVIEW_REQUIRED"
+        elif f.status == "NOT_APPLICABLE":
+            result_compat = "COMPLIANT"
+
+        check_items.append(RuleCheckItem(
+            rule_number=f.rule_number,
+            rule_title=f.rule_title,
+            field_checked=f.field_checked,
+            detected_value=f.officer_verified_value or f.extracted_value,
+            extracted_value=f.extracted_value,
+            officer_verified_value=f.officer_verified_value,
+            expected_condition=f.expected_condition,
+            result=result_compat,
+            controlled_status=f.status.value if hasattr(f.status, "value") else str(f.status),
+            applicability=f.applicability.value if hasattr(f.applicability, "value") else str(f.applicability),
+            readability=f.readability.value if hasattr(f.readability, "value") else str(f.readability),
+            explanation=f.explanation,
+            legal_ground=f.legal_ground,
+            recommendation=f.recommendation,
+            evidence_side=f.evidence_side
+        ))
 
     return RuleCheckResponse(
         inspection_id=request.inspection_id,
-        overall_status=overall_status,
-        passed_count=passed_count,
-        review_count=review_count,
-        violation_count=violation_count,
-        checks=checks
+        overall_status=engine_result.overall_status,
+        passed_count=engine_result.appears_compliant_count,
+        review_count=engine_result.requires_officer_review_count,
+        violation_count=engine_result.potential_non_compliance_count,
+        appears_compliant_count=engine_result.appears_compliant_count,
+        potential_non_compliance_count=engine_result.potential_non_compliance_count,
+        requires_officer_review_count=engine_result.requires_officer_review_count,
+        not_applicable_count=engine_result.not_applicable_count,
+        not_detected_count=engine_result.not_detected_count,
+        checks=check_items
     )
 
 @router.post("/ecommerce/scrape", response_model=EcommerceScrapeResponse)

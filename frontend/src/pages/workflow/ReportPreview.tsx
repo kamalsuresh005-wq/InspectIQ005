@@ -1,5 +1,17 @@
 import React, { useState } from 'react';
-import { Download, Printer, FileText, ArrowLeft, QrCode, ShieldCheck, CheckCircle2, Home } from 'lucide-react';
+import { 
+  Download, 
+  Printer, 
+  ArrowLeft, 
+  ShieldCheck, 
+  CheckCircle2, 
+  AlertTriangle, 
+  XCircle,
+  FileCheck2,
+  MapPin,
+  ExternalLink,
+  History
+} from 'lucide-react';
 import { useInspection } from '../../context/InspectionContext';
 import { ReportService } from '../../services/reportService';
 
@@ -21,29 +33,28 @@ export const ReportPreview: React.FC = () => {
     }
   };
 
-  const handleExportDocx = () => {
-    ReportService.exportToDocx(currentInspection);
-  };
-
   const handlePrint = () => {
     ReportService.printReport();
   };
 
-  const primaryImage = currentInspection.images.find(img => img.side === 'front') || currentInspection.images[0];
-  const backImage = currentInspection.images.find(img => img.side === 'back') || currentInspection.images[1];
+  const checks = currentInspection.complianceChecks || [];
+  const declarations = currentInspection.declarations || [];
+  const images = currentInspection.images || [];
+
+  const decisionLabel = currentInspection.finalDecision || currentInspection.officerDecision?.decision || currentInspection.status;
 
   return (
-    <div className="max-w-2xl mx-auto space-y-4 pb-8 p-3 sm:p-4">
+    <div className="max-w-2xl mx-auto space-y-4 pb-12 p-3 sm:p-4">
       
       {/* Top Action Bar */}
-      <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs flex items-center justify-between gap-2 print:hidden">
+      <div className="bg-white border border-[#D9E1E8] rounded-xl p-3 shadow-xs flex items-center justify-between gap-2 print:hidden">
         <button
           type="button"
-          onClick={() => setActiveTab('dashboard')}
-          className="flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-slate-900"
+          onClick={() => setFlowStep('final_decision')}
+          className="flex items-center gap-1 text-xs font-semibold text-[#52616F] hover:text-[#12304A] cursor-pointer"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
-          <span>Home</span>
+          <span>Back to Review</span>
         </button>
 
         <div className="flex items-center gap-1.5">
@@ -51,238 +62,338 @@ export const ReportPreview: React.FC = () => {
             type="button"
             onClick={handleDownloadPdf}
             disabled={isExporting}
-            className="bg-blue-900 hover:bg-blue-800 text-white font-bold text-xs py-1.5 px-3 rounded-lg flex items-center gap-1 shadow-xs"
+            className="bg-[#12304A] hover:bg-[#0B2239] text-white font-bold text-xs py-2 px-3 rounded-lg flex items-center gap-1.5 shadow-xs cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>{isExporting ? 'Exporting...' : 'PDF'}</span>
+            <span>{isExporting ? 'Generating PDF...' : 'Generate PDF Report'}</span>
           </button>
 
           <button
             type="button"
             onClick={handlePrint}
-            className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs py-1.5 px-2.5 rounded-lg border border-slate-300 flex items-center gap-1"
+            className="bg-[#F4F7FA] hover:bg-[#D9E1E8] text-[#12304A] font-bold text-xs py-2 px-3 rounded-lg border border-[#D9E1E8] flex items-center gap-1.5 cursor-pointer"
           >
             <Printer className="w-3.5 h-3.5" />
-            <span>Print</span>
+            <span>Print Report</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('inspections')}
+            className="bg-[#0F766E] hover:bg-[#0D655E] text-white font-bold text-xs py-2 px-3 rounded-lg flex items-center gap-1.5 shadow-xs cursor-pointer"
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>Complete & View History</span>
           </button>
         </div>
       </div>
 
-      {/* Professional Inspection Document */}
+      {/* Formal Inspection Document */}
       <div
         id="compliance-report-document"
-        className="bg-white border border-slate-300 rounded-xl p-5 sm:p-8 shadow-sm text-slate-900 font-sans space-y-5 print:border-none print:shadow-none print:p-0"
+        className="bg-white border border-[#D9E1E8] rounded-xl p-6 sm:p-8 shadow-sm text-[#12304A] font-sans space-y-6 print:border-none print:shadow-none print:p-0"
       >
         {/* Document Header (Neutral InspectIQ Branding) */}
-        <div className="border-b-2 border-slate-900 pb-4 text-center space-y-1">
-          <div className="flex items-center justify-center gap-2 mb-1">
-            <div className="w-6 h-6 rounded bg-blue-900 text-white flex items-center justify-center font-bold text-xs">
-              IQ
-            </div>
-            <span className="text-sm font-extrabold tracking-tight text-blue-950">
-              InspectIQ
-            </span>
-          </div>
-          <h1 className="text-xs font-bold uppercase tracking-widest text-slate-600">
-            LEGAL METROLOGY FIELD INSPECTION REPORT
+        <div className="border-b-2 border-[#12304A] pb-4 text-center space-y-1">
+          <h1 className="text-xl font-extrabold tracking-tight text-[#12304A]">
+            INSPECTIQ
           </h1>
-          <p className="text-[10.5px] text-slate-500">
-            Compliance Verification under Legal Metrology (Packaged Commodities) Rules, 2011
+          <h2 className="text-xs font-bold uppercase tracking-widest text-[#0F766E]">
+            PACKAGED COMMODITY INSPECTION REPORT
+          </h2>
+          <p className="text-[10.5px] text-[#52616F]">
+            Under Legal Metrology Act, 2009 & Legal Metrology (Packaged Commodities) Rules, 2011
           </p>
         </div>
 
-        {/* Particulars Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs">
-          <div>
-            <span className="text-[9.5px] font-bold uppercase tracking-wider text-slate-400 block">Inspection ID</span>
-            <span className="font-mono font-bold text-slate-900 text-xs">{currentInspection.inspectionNumber}</span>
-          </div>
-          <div>
-            <span className="text-[9.5px] font-bold uppercase tracking-wider text-slate-400 block">Date / Time</span>
-            <span className="font-semibold text-slate-800 text-[11px]">
-              {new Date(currentInspection.createdAt).toLocaleDateString('en-IN', { dateStyle: 'medium' })}
-            </span>
-          </div>
-          <div>
-            <span className="text-[9.5px] font-bold uppercase tracking-wider text-slate-400 block">Officer</span>
-            <span className="font-semibold text-slate-900 text-[11px] block truncate">{currentInspection.officerName}</span>
-            <span className="text-[9.5px] text-slate-500 block truncate">{currentInspection.officerDesignation}</span>
-          </div>
-          <div>
-            <span className="text-[9.5px] font-bold uppercase tracking-wider text-slate-400 block">Premises</span>
-            <span className="font-semibold text-slate-900 text-[11px] block truncate">
-              {currentInspection.premisesName || currentInspection.retailerName || 'Retail Premises'}
-            </span>
-          </div>
-        </div>
-
-        {/* Location & GPS */}
-        <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-xs flex items-center justify-between">
-          <div>
-            <span className="text-[9.5px] font-bold uppercase tracking-wider text-slate-400 block">GPS Coordinates</span>
-            <span className="font-mono text-slate-800 text-[11px]">
-              {currentInspection.locationData?.latitude 
-                ? `${currentInspection.locationData.latitude.toFixed(5)}° N, ${currentInspection.locationData.longitude?.toFixed(5)}° E (±${currentInspection.locationData.accuracy?.toFixed(0)}m)`
-                : currentInspection.location || 'Manual Entry'}
-            </span>
-          </div>
-          <span className="text-[10px] font-semibold text-blue-900 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-            Field Inspection
-          </span>
-        </div>
-
-        {/* Product Details */}
-        <div className="space-y-1.5 text-xs">
-          <h3 className="font-bold text-slate-900 uppercase tracking-wider text-[11px] border-b border-slate-200 pb-1">
-            1. Inspected Commodity Details
+        {/* Section A: Inspection Particulars */}
+        <div className="space-y-1.5">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-[#12304A] bg-[#F4F7FA] px-2.5 py-1 rounded">
+            Section A: Inspection Particulars
           </h3>
-          <div className="grid grid-cols-2 gap-2 pt-0.5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 rounded-lg border border-[#D9E1E8] text-xs">
             <div>
-              <span className="text-slate-500">Commodity Name:</span>{' '}
-              <strong className="text-slate-900">{currentInspection.productName}</strong>
+              <span className="text-[10px] text-[#52616F] block">Inspection ID</span>
+              <span className="font-mono font-bold text-[#12304A]">{currentInspection.inspectionNumber}</span>
             </div>
             <div>
-              <span className="text-slate-500">Brand:</span>{' '}
-              <strong className="text-slate-900">{currentInspection.brand}</strong>
+              <span className="text-[10px] text-[#52616F] block">Date & Time</span>
+              <span className="font-medium text-[#12304A]">{new Date(currentInspection.createdAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
             </div>
             <div>
-              <span className="text-slate-500">Declared Net Qty:</span>{' '}
-              <strong className="text-slate-900 font-mono">{currentInspection.netQuantity}</strong>
+              <span className="text-[10px] text-[#52616F] block">Officer Name & ID</span>
+              <span className="font-medium text-[#12304A]">{currentInspection.officerName} ({currentInspection.officerId})</span>
             </div>
             <div>
-              <span className="text-slate-500">Declared MRP:</span>{' '}
-              <strong className="text-slate-900 font-mono">{currentInspection.mrp}</strong>
+              <span className="text-[10px] text-[#52616F] block">Designation & Zone</span>
+              <span className="font-medium text-[#12304A]">{currentInspection.officerDesignation || 'Enforcement Officer'}</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-[#52616F] block">Inspection Type</span>
+              <span className="font-medium text-[#12304A] capitalize">{currentInspection.inspectionType} Inspection</span>
+            </div>
+            <div className="col-span-3">
+              <span className="text-[10px] text-[#52616F] block">Surveillance Purpose</span>
+              <span className="font-medium text-[#12304A]">{currentInspection.inspectionPurpose || 'Routine Market Surveillance'}</span>
             </div>
           </div>
         </div>
 
-        {/* Actual Captured Packaging Evidence Photos */}
-        {currentInspection.images.length > 0 && (
-          <div className="space-y-1.5 text-xs">
-            <h3 className="font-bold text-slate-900 uppercase tracking-wider text-[11px] border-b border-slate-200 pb-1">
-              2. Packaging Evidence Photos ({currentInspection.images.length} Attached)
-            </h3>
-            <div className="grid grid-cols-2 gap-3 pt-1">
-              {primaryImage && (
-                <div className="border border-slate-200 rounded p-1.5 text-center space-y-1">
-                  <img
-                    src={primaryImage.url}
-                    alt="Front Packaging Evidence"
-                    className="max-h-36 mx-auto object-contain rounded"
-                  />
-                  <span className="text-[9.5px] font-mono text-slate-600 block">
-                    {primaryImage.label || 'Front (PDP)'}
-                  </span>
-                </div>
-              )}
-              {backImage && (
-                <div className="border border-slate-200 rounded p-1.5 text-center space-y-1">
-                  <img
-                    src={backImage.url}
-                    alt="Back Packaging Evidence"
-                    className="max-h-36 mx-auto object-contain rounded"
-                  />
-                  <span className="text-[9.5px] font-mono text-slate-600 block">
-                    {backImage.label || 'Back (Statutory Box)'}
-                  </span>
-                </div>
-              )}
+        {/* Section B: Premises Details */}
+        <div className="space-y-1.5">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-[#12304A] bg-[#F4F7FA] px-2.5 py-1 rounded">
+            Section B: Premises Details
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 p-3 rounded-lg border border-[#D9E1E8] text-xs">
+            <div>
+              <span className="text-[10px] text-[#52616F] block">Premises / Store Name</span>
+              <span className="font-bold text-[#12304A]">{currentInspection.premisesName || currentInspection.retailerName || 'Retail Facility'}</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-[#52616F] block">Premises Type</span>
+              <span className="font-medium text-[#12304A]">{currentInspection.premisesType || 'Retail Store'}</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-[#52616F] block">GSTIN / Identification</span>
+              <span className="font-medium font-mono text-[#12304A]">{currentInspection.retailerGstin || 'Not Recorded'}</span>
+            </div>
+            <div className="col-span-2 sm:col-span-3">
+              <span className="text-[10px] text-[#52616F] block">Address & Coordinates</span>
+              <span className="font-medium text-[#12304A]">{currentInspection.location || currentInspection.premisesAddress || 'Verified during on-site inspection'}</span>
             </div>
           </div>
-        )}
+        </div>
 
-        {/* Declarations Table */}
-        <div className="space-y-1.5 text-xs">
-          <h3 className="font-bold text-slate-900 uppercase tracking-wider text-[11px] border-b border-slate-200 pb-1">
-            3. Statutory Declarations Audit (Rule 6)
+        {/* Section C: Product Information */}
+        <div className="space-y-1.5">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-[#12304A] bg-[#F4F7FA] px-2.5 py-1 rounded">
+            Section C: Product Information
           </h3>
-          <table className="w-full text-left text-xs border border-slate-200">
-            <thead>
-              <tr className="bg-slate-100 text-[10px] font-bold text-slate-700">
-                <th className="p-1.5">Declaration Field</th>
-                <th className="p-1.5">Detected Value</th>
-                <th className="p-1.5 text-right">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {currentInspection.declarations.slice(0, 6).map((decl) => (
-                <tr key={decl.id}>
-                  <td className="p-1.5 font-semibold text-slate-800">{decl.fieldName}</td>
-                  <td className="p-1.5 font-mono text-[11px] text-slate-900">{decl.detectedValue}</td>
-                  <td className="p-1.5 text-right font-bold text-[10px]">
-                    <span className={
-                      decl.status === 'detected' ? 'text-emerald-700' : decl.status === 'review' ? 'text-amber-800' : 'text-red-700'
-                    }>
-                      {decl.status === 'detected' ? '✓ Detected' : decl.status === 'review' ? '⚠ Review' : '— Not Detected'}
-                    </span>
-                  </td>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 rounded-lg border border-[#D9E1E8] text-xs">
+            <div>
+              <span className="text-[10px] text-[#52616F] block">Product Name</span>
+              <span className="font-bold text-[#12304A]">{currentInspection.productName}</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-[#52616F] block">Brand</span>
+              <span className="font-medium text-[#12304A]">{currentInspection.brand}</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-[#52616F] block">Category</span>
+              <span className="font-medium text-[#12304A]">{currentInspection.category}</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-[#52616F] block">Declared Net Quantity</span>
+              <span className="font-medium text-[#12304A]">{currentInspection.netQuantity || 'N/A'}</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-[#52616F] block">Maximum Retail Price (MRP)</span>
+              <span className="font-bold text-[#12304A]">{currentInspection.mrp || 'N/A'}</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-[#52616F] block">Batch / Lot Number</span>
+              <span className="font-medium text-[#12304A]">{currentInspection.batchNumber || 'N/A'}</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-[#52616F] block">Month & Year of Mfg/Pack</span>
+              <span className="font-medium text-[#12304A]">{currentInspection.declarations?.find(d => d.fieldName.toLowerCase().includes('date'))?.detectedValue || 'Recorded on pack'}</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-[#52616F] block">Expiry / Best Before</span>
+              <span className="font-medium text-[#12304A]">{currentInspection.declarations?.find(d => d.fieldName.toLowerCase().includes('expiry') || d.fieldName.toLowerCase().includes('before'))?.detectedValue || 'Recorded on pack'}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Section D: Manufacturer & Packer Details */}
+        <div className="space-y-1.5">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-[#12304A] bg-[#F4F7FA] px-2.5 py-1 rounded">
+            Section D: Manufacturer, Packer & Consumer Care Details
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-3 rounded-lg border border-[#D9E1E8] text-xs">
+            <div>
+              <span className="text-[10px] text-[#52616F] block">Manufacturer / Packer Name & Address</span>
+              <span className="font-medium text-[#12304A]">{currentInspection.manufacturerName || currentInspection.declarations?.find(d => d.fieldName.toLowerCase().includes('manufacturer'))?.detectedValue || 'Recorded on package'}</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-[#52616F] block">Country of Origin</span>
+              <span className="font-medium text-[#12304A]">{currentInspection.declarations?.find(d => d.fieldName.toLowerCase().includes('origin'))?.detectedValue || 'India'}</span>
+            </div>
+            <div className="col-span-1 sm:col-span-2">
+              <span className="text-[10px] text-[#52616F] block">Consumer Care Contact Details (Rule 6(1)(da))</span>
+              <span className="font-medium text-[#12304A]">{currentInspection.declarations?.find(d => d.fieldName.toLowerCase().includes('consumer') || d.fieldName.toLowerCase().includes('care'))?.detectedValue || 'Name, phone, email, and address declared'}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Section E: Declaration Audit Trail */}
+        <div className="space-y-1.5">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-[#12304A] bg-[#F4F7FA] px-2.5 py-1 rounded">
+            Section E: Statutory Declaration Audit Trail
+          </h3>
+          <div className="border border-[#D9E1E8] rounded-lg overflow-hidden">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-[#F4F7FA] text-[#52616F] border-b border-[#D9E1E8]">
+                <tr>
+                  <th className="py-2 px-3 font-bold">Mandatory Declaration</th>
+                  <th className="py-2 px-3 font-bold">OCR Extracted</th>
+                  <th className="py-2 px-3 font-bold">Officer Verified</th>
+                  <th className="py-2 px-3 font-bold">Status</th>
+                  <th className="py-2 px-3 font-bold">Applicability</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-[#D9E1E8]">
+                {declarations.map((decl) => (
+                  <tr key={decl.id}>
+                    <td className="py-2 px-3 font-medium text-[#12304A]">{decl.fieldName}</td>
+                    <td className="py-2 px-3 font-mono text-[11px] text-[#52616F]">{decl.extractedValue || decl.originalValue || decl.detectedValue || '—'}</td>
+                    <td className="py-2 px-3 font-medium text-[#12304A]">{decl.officerVerifiedValue || decl.detectedValue || '—'}</td>
+                    <td className="py-2 px-3">
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                        decl.status === 'detected' ? 'bg-[#E6F4F1] text-[#0F766E]' : 'bg-amber-100 text-amber-900'
+                      }`}>
+                        {decl.status === 'detected' ? 'Verified' : 'Review'}
+                      </span>
+                    </td>
+                    <td className="py-2 px-3 text-[11px] text-[#52616F]">
+                      {decl.applicabilityStatus || 'APPLICABLE'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        {/* Compliance Findings */}
-        <div className="space-y-1.5 text-xs">
-          <h3 className="font-bold text-slate-900 uppercase tracking-wider text-[11px] border-b border-slate-200 pb-1">
-            4. Legal Metrology Compliance Findings
+        {/* Section F: Statutory Compliance Findings */}
+        <div className="space-y-1.5">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-[#12304A] bg-[#F4F7FA] px-2.5 py-1 rounded">
+            Section F: Statutory Compliance Findings
           </h3>
-          <div className="space-y-1.5 pt-0.5">
-            {currentInspection.complianceChecks.filter(c => c.result !== 'COMPLIANT').map((chk) => (
-              <div key={chk.checkId} className="p-2 bg-amber-50/70 border border-amber-200 rounded text-xs">
-                <div className="flex justify-between font-bold text-slate-900">
-                  <span>{chk.ruleTitle} ({chk.ruleNumber})</span>
-                  <span className="text-amber-800 uppercase text-[10px]">{chk.result.replace(/_/g, ' ')}</span>
+          <div className="border border-[#D9E1E8] rounded-lg overflow-hidden">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-[#F4F7FA] text-[#52616F] border-b border-[#D9E1E8]">
+                <tr>
+                  <th className="py-2 px-3 font-bold">Rule Ref</th>
+                  <th className="py-2 px-3 font-bold">Parameter</th>
+                  <th className="py-2 px-3 font-bold">System Finding</th>
+                  <th className="py-2 px-3 font-bold">Officer Status</th>
+                  <th className="py-2 px-3 font-bold">Statutory Provision</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#D9E1E8]">
+                {checks.map((chk) => (
+                  <tr key={chk.checkId}>
+                    <td className="py-2 px-3 font-bold text-[#12304A]">{chk.ruleNumber}</td>
+                    <td className="py-2 px-3 text-[#12304A]">{chk.ruleTitle}</td>
+                    <td className="py-2 px-3">
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                        chk.result === 'POTENTIAL_NON_COMPLIANCE'
+                          ? 'bg-red-100 text-red-800'
+                          : chk.result === 'REQUIRES_OFFICER_REVIEW'
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-emerald-100 text-emerald-800'
+                      }`}>
+                        {chk.result}
+                      </span>
+                    </td>
+                    <td className="py-2 px-3 text-[11px] text-[#12304A]">
+                      {chk.officerStatus === 'Overridden' ? `${chk.controlledStatus} (Overridden)` : 'Confirmed'}
+                    </td>
+                    <td className="py-2 px-3 text-[11px] text-[#52616F]">{chk.statutoryProvision || 'Rule 6, PCR 2011'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Section G: Photographic Evidence */}
+        <div className="space-y-1.5">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-[#12304A] bg-[#F4F7FA] px-2.5 py-1 rounded">
+            Section G: Photographic Evidence Records ({images.length})
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 rounded-lg border border-[#D9E1E8]">
+            {images.map((img, idx) => (
+              <div key={img.id} className="space-y-1 text-center">
+                <div className="w-full h-24 bg-slate-100 rounded-lg overflow-hidden border border-[#D9E1E8]">
+                  <img src={img.url} alt={`Evidence ${idx + 1}`} className="w-full h-full object-cover" />
                 </div>
-                <p className="text-slate-700 mt-0.5">{chk.explanation}</p>
+                <span className="text-[10px] font-bold text-[#12304A] block capitalize">{img.side.replace(/_/g, ' ')}</span>
+                <span className="text-[9px] text-[#52616F] block truncate">{img.description || 'Packaging capture'}</span>
               </div>
             ))}
-            {currentInspection.complianceChecks.filter(c => c.result !== 'COMPLIANT').length === 0 && (
-              <p className="p-2 bg-emerald-50 text-emerald-800 rounded font-medium">
-                ✓ All inspected declarations conform to Legal Metrology (Packaged Commodities) Rules, 2011.
-              </p>
-            )}
           </div>
         </div>
 
-        {/* Officer Final Decision & Signature */}
-        <div className="border-t-2 border-slate-900 pt-3 space-y-3 text-xs">
-          <div className="flex justify-between items-start">
-            <div>
-              <span className="text-[10px] font-bold text-slate-400 uppercase">Final Officer Order</span>
-              <p className="font-bold text-sm text-slate-900 mt-0.5">
-                {currentInspection.officerDecision?.decision || currentInspection.status}
-              </p>
-              {currentInspection.remarks && (
-                <p className="text-slate-700 mt-1 italic">
-                  &ldquo;{currentInspection.remarks}&rdquo;
-                </p>
-              )}
+        {/* Section H: Officer Assessment & Final Decision */}
+        <div className="space-y-1.5">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-[#12304A] bg-[#F4F7FA] px-2.5 py-1 rounded">
+            Section H: Officer Assessment & Final Decision
+          </h3>
+          <div className="p-3.5 rounded-lg border border-[#D9E1E8] space-y-2 text-xs">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-[#52616F] block">System Advisory Assessment</span>
+                <span className="font-bold text-[#12304A]">{currentInspection.systemAssessment || 'Evaluated'}</span>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] text-[#52616F] block">Officer Final Determination</span>
+                <span className={`font-bold px-2 py-0.5 rounded ${
+                  decisionLabel === 'Potential Non-Compliance' || decisionLabel === 'POTENTIAL_NON_COMPLIANCE'
+                    ? 'bg-red-100 text-red-900'
+                    : decisionLabel === 'Requires Further Review' || decisionLabel === 'REQUIRES_FURTHER_REVIEW'
+                    ? 'bg-amber-100 text-amber-900'
+                    : 'bg-emerald-100 text-emerald-900'
+                }`}>
+                  {decisionLabel}
+                </span>
+              </div>
             </div>
 
-            <div className="text-right space-y-0.5">
-              <span className="text-[9px] font-bold text-blue-900 uppercase block">Certified Digitally</span>
-              <p className="font-bold text-slate-900">{currentInspection.officerName}</p>
-              <p className="text-[10px] text-slate-500">{currentInspection.officerDesignation}</p>
-              <span className="text-[9px] font-mono text-slate-400 block">
-                REF: {currentInspection.officerDecision?.digitalSignatureRef || 'DSC-VERIFIED'}
+            <div>
+              <span className="text-[10px] text-[#52616F] block">Official Remarks & Observations</span>
+              <p className="text-xs text-[#17212B] bg-[#F4F7FA] p-2.5 rounded-lg mt-0.5">
+                {currentInspection.officerRemarks || currentInspection.remarks || 'Inspection completed and findings recorded.'}
+              </p>
+            </div>
+            
+            <div className="text-[10px] text-[#52616F]">
+              Determination recorded at: {currentInspection.reviewedAt ? new Date(currentInspection.reviewedAt).toLocaleString('en-IN') : new Date().toLocaleString('en-IN')}
+            </div>
+          </div>
+        </div>
+
+        {/* Section I: Statutory Notice & Signatures */}
+        <div className="space-y-2 pt-2">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-[#12304A] bg-[#F4F7FA] px-2.5 py-1 rounded">
+            Section I: Statutory Notice & Formal Signatures
+          </h3>
+          
+          <div className="p-3 rounded-lg border border-[#D9E1E8] text-[10.5px] text-[#52616F] leading-relaxed">
+            <b>Statutory Notice:</b> This formal inspection report constitutes an official field examination record under the provisions of the Legal Metrology Act, 2009 and the Legal Metrology (Packaged Commodities) Rules, 2011. Where potential non-compliance is recorded, further statutory proceedings may follow in accordance with Section 36 and Section 48 of the Act.
+          </div>
+
+          <div className="grid grid-cols-2 gap-6 pt-6 text-xs">
+            <div className="border-t border-[#12304A] pt-2">
+              <span className="font-bold text-[#12304A] block">Inspecting Officer Signature</span>
+              <span className="text-[11px] text-[#12304A] block">{currentInspection.officerName}</span>
+              <span className="text-[10px] text-[#52616F] block">{currentInspection.officerDesignation} ({currentInspection.officerId})</span>
+              <span className="text-[9.5px] text-[#0F766E] font-mono block mt-1">
+                Ref: {currentInspection.officerDecision?.digitalSignatureRef || `LM-DSC-${currentInspection.officerId}-VERIFIED`}
               </span>
             </div>
+
+            <div className="border-t border-[#12304A] pt-2 text-right">
+              <span className="font-bold text-[#12304A] block">Trader / Premises Representative</span>
+              <span className="text-[11px] text-[#12304A] block">{currentInspection.premisesName || 'Facility In-charge'}</span>
+              <span className="text-[10px] text-[#52616F] block">Acknowledgement of Inspection Record</span>
+              <span className="text-[9.5px] text-[#52616F] block mt-1">Date: {new Date().toLocaleDateString('en-IN')}</span>
+            </div>
           </div>
+
         </div>
 
-      </div>
-
-      {/* Return Home Button */}
-      <div className="pt-2 text-center print:hidden">
-        <button
-          type="button"
-          onClick={() => setActiveTab('dashboard')}
-          className="text-xs font-semibold text-slate-600 hover:text-slate-900 flex items-center justify-center gap-1 mx-auto"
-        >
-          <Home className="w-3.5 h-3.5" />
-          <span>Return to InspectIQ Home</span>
-        </button>
       </div>
 
     </div>

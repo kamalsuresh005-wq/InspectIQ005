@@ -10,10 +10,15 @@ class OcrRequest(BaseModel):
 class ExtractedField(BaseModel):
     field_key: str
     field_name: str
-    detected_value: str
-    confidence: float
-    status: str
-    rule_ref: str
+    detected_value: Optional[str] = ""
+    raw_ocr_text: Optional[str] = ""
+    extracted_value: Optional[str] = ""
+    officer_verified_value: Optional[str] = None
+    applicability_status: Optional[str] = "APPLICABLE"
+    readability_status: Optional[str] = "Needs Review"
+    confidence: Optional[float] = 85.0
+    status: Optional[str] = "detected"
+    rule_ref: Optional[str] = ""
 
 class OcrResponse(BaseModel):
     success: bool
@@ -35,10 +40,17 @@ class RuleCheckItem(BaseModel):
     rule_title: str
     field_checked: str
     detected_value: str
+    extracted_value: Optional[str] = None
+    officer_verified_value: Optional[str] = None
     expected_condition: str
     result: str  # COMPLIANT, REVIEW_REQUIRED, POTENTIAL_NON_COMPLIANCE
+    controlled_status: Optional[str] = None
+    applicability: Optional[str] = None
+    readability: Optional[str] = None
     explanation: str
     legal_ground: str
+    recommendation: Optional[str] = ""
+    evidence_side: Optional[str] = "declaration_area"
 
 class RuleCheckResponse(BaseModel):
     inspection_id: str
@@ -46,6 +58,11 @@ class RuleCheckResponse(BaseModel):
     passed_count: int
     review_count: int
     violation_count: int
+    appears_compliant_count: Optional[int] = 0
+    potential_non_compliance_count: Optional[int] = 0
+    requires_officer_review_count: Optional[int] = 0
+    not_applicable_count: Optional[int] = 0
+    not_detected_count: Optional[int] = 0
     checks: List[RuleCheckItem]
 
 class EcommerceScrapeRequest(BaseModel):

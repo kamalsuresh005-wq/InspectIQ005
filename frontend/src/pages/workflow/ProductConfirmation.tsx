@@ -74,7 +74,7 @@ export const ProductConfirmation: React.FC = () => {
           <div className="py-2 last:pb-0 flex items-center justify-between">
             <span className="text-slate-500 font-medium">Source</span>
             <span className="text-[11px] font-bold text-blue-900 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
-              {prod?.source || 'AI Identification'}
+              {prod?.source || 'Package Inspection'}
             </span>
           </div>
 

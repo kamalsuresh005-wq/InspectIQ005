@@ -263,7 +263,7 @@ export const EvidenceViewer: React.FC = () => {
                   <span className="font-mono font-bold text-slate-800 text-[11px] mt-0.5 block">{activeEvidence.ruleRef}</span>
                 </div>
                 <div className="p-2 bg-slate-50 rounded-lg border border-slate-200">
-                  <span className="text-[9.5px] text-slate-400 font-bold uppercase block">AI Confidence</span>
+                  <span className="text-[9.5px] text-slate-400 font-bold uppercase block">OCR Confidence</span>
                   <span className="font-mono font-bold text-emerald-700 text-[11px] mt-0.5 block">{activeEvidence.confidence}%</span>
                 </div>
               </div>

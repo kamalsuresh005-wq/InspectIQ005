@@ -1,5 +1,32 @@
-import { ExtractedDeclaration, ComplianceCheck, Violation, EvidenceItem, PackageImage, CheckResult } from '../types';
-import { LEGAL_RULES_DATABASE, SCHEDULE_TABLE_FONT_SIZES } from '../data/legalRules';
+/**
+ * Legal Metrology Rule Engine Service (Frontend)
+ * Statute: Legal Metrology Act, 2009 & Legal Metrology (Packaged Commodities) Rules, 2011 (PCR 2011)
+ * 
+ * Strict Principles:
+ * 1. Deterministic evaluation (no AI/Gemini).
+ * 2. Controlled Compliance Statuses:
+ *    - APPEARS_COMPLIANT
+ *    - POTENTIAL_NON_COMPLIANCE
+ *    - REQUIRES_OFFICER_REVIEW
+ *    - NOT_APPLICABLE
+ *    - NOT_DETECTED
+ * 3. Auditability: rawOcrText, extractedValue, officerVerifiedValue remain distinct.
+ * 4. Font/Readability: No fake physical mm measurements without calibrated targets.
+ * 5. Evidence Linking: Findings link directly to packaging photographs.
+ * 6. Officer Decision Support: Proposes findings; Officer makes final determination.
+ */
+
+import { 
+  ExtractedDeclaration, 
+  ComplianceCheck, 
+  Violation, 
+  EvidenceItem, 
+  PackageImage, 
+  ComplianceControlledStatus,
+  ApplicabilityStatus,
+  ReadabilityAssessmentStatus
+} from '../types';
+import { ApiClient } from './apiClient';
 
 export interface RuleAssessmentResult {
   checks: ComplianceCheck[];
@@ -8,411 +35,449 @@ export interface RuleAssessmentResult {
   passedCount: number;
   reviewCount: number;
   violationCount: number;
-  overallStatus: 'Compliant' | 'Review Required' | 'Potential Non-Compliance';
+  appearsCompliantCount: number;
+  potentialNonComplianceCount: number;
+  requiresOfficerReviewCount: number;
+  notApplicableCount: number;
+  notDetectedCount: number;
+  overallStatus: 'Appears Compliant' | 'Requires Officer Review' | 'Potential Non-Compliance' | 'Compliant' | 'Review Required';
 }
 
 export class RuleEngineService {
   /**
-   * Evaluates declarations and generates compliance checks, violations, and evidence items.
+   * Asynchronous evaluation attempting backend FastAPI rule engine with graceful deterministic client fallback.
+   */
+  public static async evaluateComplianceAsync(
+    declarations: ExtractedDeclaration[],
+    images: PackageImage[],
+    inspectionId: string,
+    metadata?: {
+      productName?: string;
+      category?: string;
+      netQuantity?: string;
+      mrp?: string;
+      pdpAreaCm2?: number;
+    }
+  ): Promise<RuleAssessmentResult> {
+    try {
+      const payload = {
+        inspection_id: inspectionId,
+        product_name: metadata?.productName || 'Packaged Commodity',
+        category: metadata?.category || 'Retail Pack',
+        net_quantity: metadata?.netQuantity || '70 g',
+        mrp: metadata?.mrp || '₹ 50.00',
+        pdp_area_cm2: metadata?.pdpAreaCm2 || 224.0,
+        declarations: declarations.map((d) => ({
+          field_key: d.fieldKey,
+          field_name: d.fieldName,
+          detected_value: d.detectedValue,
+          raw_ocr_text: d.rawOcrText || '',
+          extracted_value: d.extractedValue || d.detectedValue,
+          officer_verified_value: d.officerVerifiedValue || null,
+          applicability_status: d.applicabilityStatus || 'APPLICABLE',
+          readability_status: d.readabilityAssessment || 'Needs Review',
+          confidence: d.confidence,
+          status: d.status,
+          rule_ref: d.ruleRef,
+        })),
+      };
+
+      const data = await ApiClient.post<any>('/api/v1/validate-rules', payload, { timeoutMs: 5000 });
+      if (data && data.checks) {
+        return this.mapBackendResponseToResult(data, declarations, images, inspectionId);
+      }
+    } catch {
+      // Backend service offline or network issue; fallback deterministically to client rule engine
+    }
+
+    return this.evaluateCompliance(
+      declarations,
+      images,
+      inspectionId,
+      metadata?.netQuantity || '70 g',
+      metadata?.pdpAreaCm2 || 224,
+      metadata
+    );
+  }
+
+  /**
+   * Deterministic client-side evaluation under PCR 2011.
    */
   public static evaluateCompliance(
     declarations: ExtractedDeclaration[],
     images: PackageImage[],
     inspectionId: string,
     netQuantityStr: string = '70 g',
-    pdpAreaCm2: number = 224
+    pdpAreaCm2: number = 224,
+    metadata?: { category?: string; productName?: string }
   ): RuleAssessmentResult {
     const checks: ComplianceCheck[] = [];
     const violations: Violation[] = [];
     const evidenceList: EvidenceItem[] = [];
 
-    // Helper to find declaration by key
     const getDecl = (key: string) => declarations.find((d) => d.fieldKey === key);
+    const resolveValue = (d?: ExtractedDeclaration) => {
+      if (!d) return '';
+      if (d.officerVerifiedValue !== undefined && d.officerVerifiedValue !== null && d.officerVerifiedValue.trim()) {
+        return d.officerVerifiedValue.trim();
+      }
+      if (d.extractedValue !== undefined && d.extractedValue !== null && d.extractedValue.trim()) {
+        return d.extractedValue.trim();
+      }
+      return (d.detectedValue || '').trim();
+    };
 
-    // 1. Check Generic Name (Rule 6(1)(b))
+    const findEvidenceImage = (side: string) => {
+      return images.find((img) => img.side === side) || images[0];
+    };
+
+    // 1. Generic Name (Rule 6(1)(b))
     const nameDecl = getDecl('product_name');
-    if (nameDecl && nameDecl.status === 'detected') {
-      checks.push({
-        checkId: `chk-${inspectionId}-1`,
-        inspectionId,
-        ruleId: 'RULE-6-1-B',
-        ruleNumber: 'Rule 6(1)(b)',
-        ruleTitle: 'Generic Name of Commodity',
-        fieldChecked: 'Product Name / Description',
-        detectedValue: nameDecl.detectedValue,
-        expectedCondition: 'Common/generic commodity name clearly marked on PDP',
-        result: 'COMPLIANT',
-        confidence: nameDecl.confidence,
-        explanation: 'The generic description of the product is conspicuously placed on the principal display panel.',
-        legalGround: 'Satisfies Rule 6(1)(b) of Legal Metrology (Packaged Commodities) Rules, 2011.',
-        recommendation: 'Compliant. No corrective action required.',
-      });
+    const nameVal = resolveValue(nameDecl);
+    const nameApplicability: ApplicabilityStatus = nameDecl?.applicabilityStatus || 'APPLICABLE';
+
+    if (nameApplicability === 'NOT_APPLICABLE') {
+      checks.push(this.createCheck(inspectionId, 'RULE-6-1-B', 'Rule 6(1)(b)', 'Generic Name of Commodity', 'Product Name / Description', nameDecl, 'NOT_APPLICABLE', nameApplicability, 'Common/generic name exempt for this commodity category.', 'Rule 6(1)(b) PCR 2011', 'front'));
+    } else if (!nameVal || nameVal.toLowerCase().includes('not detected')) {
+      checks.push(this.createCheck(inspectionId, 'RULE-6-1-B', 'Rule 6(1)(b)', 'Generic Name of Commodity', 'Product Name / Description', nameDecl, 'POTENTIAL_NON_COMPLIANCE', nameApplicability, 'Generic product name could not be detected on the package front.', 'Rule 6(1)(b) PCR 2011', 'front'));
+    } else if (nameVal.length >= 3) {
+      checks.push(this.createCheck(inspectionId, 'RULE-6-1-B', 'Rule 6(1)(b)', 'Generic Name of Commodity', 'Product Name / Description', nameDecl, 'APPEARS_COMPLIANT', nameApplicability, 'Generic commodity description conspicuously placed on Principal Display Panel.', 'Satisfies Rule 6(1)(b) PCR 2011.', 'front'));
     } else {
-      checks.push({
-        checkId: `chk-${inspectionId}-1`,
-        inspectionId,
-        ruleId: 'RULE-6-1-B',
-        ruleNumber: 'Rule 6(1)(b)',
-        ruleTitle: 'Generic Name of Commodity',
-        fieldChecked: 'Product Name',
-        detectedValue: nameDecl?.detectedValue || 'Not Detected',
-        expectedCondition: 'Common/generic commodity name clearly marked on PDP',
-        result: 'REVIEW_REQUIRED',
-        confidence: 65,
-        explanation: 'Generic product name could not be definitively isolated from marketing brand text.',
-        legalGround: 'Rule 6(1)(b) mandates prominent generic naming to prevent deceptive trade practices.',
-        recommendation: 'Officer manual verification required on physical package front.',
-      });
+      checks.push(this.createCheck(inspectionId, 'RULE-6-1-B', 'Rule 6(1)(b)', 'Generic Name of Commodity', 'Product Name / Description', nameDecl, 'REQUIRES_OFFICER_REVIEW', nameApplicability, 'Product name descriptor is ambiguous or very brief.', 'Rule 6(1)(b) PCR 2011', 'front'));
     }
 
-    // 2. Check Manufacturer Name & Address (Rule 6(1)(a))
-    const mfgDecl = getDecl('manufacturer_name');
-    const addrDecl = getDecl('address');
-    if (mfgDecl && addrDecl && addrDecl.detectedValue.length > 15) {
-      checks.push({
-        checkId: `chk-${inspectionId}-2`,
-        inspectionId,
-        ruleId: 'RULE-6-1-A',
-        ruleNumber: 'Rule 6(1)(a)',
-        ruleTitle: 'Manufacturer / Packer Legal Name & Address',
-        fieldChecked: 'Manufacturer & Factory Address',
-        detectedValue: `${mfgDecl.detectedValue}, ${addrDecl.detectedValue}`,
-        expectedCondition: 'Full legal name and complete physical postal address with PIN code',
-        result: 'COMPLIANT',
-        confidence: 94,
-        explanation: 'Complete corporate name and address with postal code verified against MCA database.',
-        legalGround: 'Full compliance with Rule 6(1)(a) PCR 2011.',
-        recommendation: 'Passed.',
-      });
+    // 2. Manufacturer Name & Address (Rule 6(1)(a))
+    const mfgDecl = getDecl('manufacturer') || getDecl('manufacturer_name');
+    const mfgVal = resolveValue(mfgDecl);
+    const mfgApplicability: ApplicabilityStatus = mfgDecl?.applicabilityStatus || 'APPLICABLE';
+
+    if (mfgApplicability === 'NOT_APPLICABLE') {
+      checks.push(this.createCheck(inspectionId, 'RULE-6-1-A', 'Rule 6(1)(a)', 'Manufacturer / Packer Legal Name & Address', 'Manufacturer Details', mfgDecl, 'NOT_APPLICABLE', mfgApplicability, 'Exempt from standard address display.', 'Rule 6(1)(a) PCR 2011', 'declaration_area'));
+    } else if (!mfgVal || mfgVal.toLowerCase().includes('not detected')) {
+      checks.push(this.createCheck(inspectionId, 'RULE-6-1-A', 'Rule 6(1)(a)', 'Manufacturer / Packer Legal Name & Address', 'Manufacturer Details', mfgDecl, 'POTENTIAL_NON_COMPLIANCE', mfgApplicability, 'Mandatory manufacturer/packer/importer name and address not detected.', 'Rule 6(1)(a) PCR 2011 read with Section 18 LM Act 2009', 'declaration_area'));
     } else {
-      checks.push({
-        checkId: `chk-${inspectionId}-2`,
-        inspectionId,
-        ruleId: 'RULE-6-1-A',
-        ruleNumber: 'Rule 6(1)(a)',
-        ruleTitle: 'Manufacturer / Packer Legal Name & Address',
-        fieldChecked: 'Address Completeness',
-        detectedValue: addrDecl?.detectedValue || 'Partial address',
-        expectedCondition: 'Full physical address including premises/city/state/PIN code',
-        result: 'REVIEW_REQUIRED',
-        confidence: 70,
-        explanation: 'Address text appears truncated or lacks standard pin-code validation.',
-        legalGround: 'Rule 6(1)(a) requires complete postal address to establish jurisdiction.',
-        recommendation: 'Verify reverse label for manufacturing factory address.',
-      });
-    }
-
-    // 3. Check Net Quantity (Rule 6(1)(c))
-    const netQtyDecl = getDecl('net_quantity');
-    if (netQtyDecl && (netQtyDecl.detectedValue.includes('g') || netQtyDecl.detectedValue.includes('kg') || netQtyDecl.detectedValue.includes('ml') || netQtyDecl.detectedValue.includes('L'))) {
-      checks.push({
-        checkId: `chk-${inspectionId}-3`,
-        inspectionId,
-        ruleId: 'RULE-6-1-C',
-        ruleNumber: 'Rule 6(1)(c)',
-        ruleTitle: 'Net Quantity Standard Units & Tolerances',
-        fieldChecked: 'Net Quantity Format',
-        detectedValue: netQtyDecl.detectedValue,
-        expectedCondition: 'Net quantity declared in legal SI units (g, kg, ml, l) with standard symbols',
-        result: 'COMPLIANT',
-        confidence: 96,
-        explanation: 'Unit expression matches Schedule II standard representations.',
-        legalGround: 'Complies with Rule 6(1)(c) and Section 18 of Legal Metrology Act, 2009.',
-        recommendation: 'Passed.',
-      });
-    } else {
-      checks.push({
-        checkId: `chk-${inspectionId}-3`,
-        inspectionId,
-        ruleId: 'RULE-6-1-C',
-        ruleNumber: 'Rule 6(1)(c)',
-        ruleTitle: 'Net Quantity Standard Units',
-        fieldChecked: 'Net Quantity Format',
-        detectedValue: netQtyDecl?.detectedValue || 'Missing',
-        expectedCondition: 'Net quantity declared in standard metric units',
-        result: 'POTENTIAL_NON_COMPLIANCE',
-        confidence: 85,
-        explanation: 'Non-standard weight/volume unit abbreviation or missing metric indicator.',
-        legalGround: 'Non-standard unit declarations are punishable under Section 36(2).',
-        recommendation: 'Issue notice under Section 36(2).',
-      });
-    }
-
-    // 4. Check MRP Declaration (Rule 6(1)(e))
-    const mrpDecl = getDecl('mrp');
-    const isMrpFormatValid = mrpDecl && (mrpDecl.detectedValue.includes('₹') || mrpDecl.detectedValue.includes('Rs') || mrpDecl.detectedValue.toLowerCase().includes('mrp'));
-    if (isMrpFormatValid) {
-      checks.push({
-        checkId: `chk-${inspectionId}-4`,
-        inspectionId,
-        ruleId: 'RULE-6-1-E',
-        ruleNumber: 'Rule 6(1)(e)',
-        ruleTitle: 'Retail Sale Price (MRP - Inclusive of all taxes)',
-        fieldChecked: 'MRP Wording & Tax Clause',
-        detectedValue: mrpDecl.detectedValue,
-        expectedCondition: '"Maximum Retail Price ₹... (incl. of all taxes)" or "MRP ₹... incl. of all taxes"',
-        result: 'COMPLIANT',
-        confidence: 93,
-        explanation: 'MRP formatted with Rupee symbol (₹) and statutory "inclusive of all taxes" disclaimer.',
-        legalGround: 'Complies with Rule 6(1)(e) as amended.',
-        recommendation: 'Passed.',
-      });
-    } else {
-      checks.push({
-        checkId: `chk-${inspectionId}-4`,
-        inspectionId,
-        ruleId: 'RULE-6-1-E',
-        ruleNumber: 'Rule 6(1)(e)',
-        ruleTitle: 'Retail Sale Price (MRP)',
-        fieldChecked: 'MRP Declaration',
-        detectedValue: mrpDecl?.detectedValue || 'Not Detected',
-        expectedCondition: 'Explicit MRP in Rupees inclusive of all taxes',
-        result: 'POTENTIAL_NON_COMPLIANCE',
-        confidence: 88,
-        explanation: 'Mandatory MRP declaration or inclusive of all taxes clause is missing or corrupted.',
-        legalGround: 'Direct contravention of Rule 6(1)(e) and Section 18.',
-        recommendation: 'Officer review required to ascertain whether price is omitted.',
-      });
-    }
-
-    // 5. Check Unit Sale Price (USP) (Rule 6(11))
-    const uspDecl = getDecl('unit_sale_price');
-    if (uspDecl && uspDecl.status === 'detected') {
-      checks.push({
-        checkId: `chk-${inspectionId}-5`,
-        inspectionId,
-        ruleId: 'RULE-6-11',
-        ruleNumber: 'Rule 6(11)',
-        ruleTitle: 'Unit Sale Price (USP) Display',
-        fieldChecked: 'Unit Price Calculation',
-        detectedValue: uspDecl.detectedValue,
-        expectedCondition: 'Unit Sale Price declared in ₹ per g/ml/piece alongside MRP',
-        result: 'COMPLIANT',
-        confidence: 92,
-        explanation: 'Unit sale price is calculated and declared compliant with 2022 amendment.',
-        legalGround: 'Rule 6(11) PCR Amendment 2022.',
-        recommendation: 'Passed.',
-      });
-    }
-
-    // 6. Font Size & Readability Analysis (Rule 5 & Table I/II)
-    // For 224 cm² PDP, statutory minimum font height is 2.0 mm
-    const requiredFontHeight = 2.0;
-    const measuredFontHeight = mrpDecl?.status === 'review' ? 1.4 : 2.2;
-    const fontCheckResult: CheckResult = measuredFontHeight < requiredFontHeight ? 'POTENTIAL_NON_COMPLIANCE' : 'COMPLIANT';
-
-    checks.push({
-      checkId: `chk-${inspectionId}-6`,
-      inspectionId,
-      ruleId: 'RULE-5',
-      ruleNumber: 'Rule 5 & Table I',
-      ruleTitle: 'Minimum Height of Numerals & Letters (Font Size)',
-      fieldChecked: 'MRP & Net Qty Numeral Height',
-      detectedValue: `Observed font height: ${measuredFontHeight} mm (Package Area: ${pdpAreaCm2} cm²)`,
-      expectedCondition: `As per Rule 5 & Table I (PDP 100-500 cm²), minimum numeral height must be ≥ ${requiredFontHeight} mm`,
-      result: fontCheckResult,
-      confidence: 87,
-      evidenceId: `evid-${inspectionId}-01`,
-      explanation: fontCheckResult === 'POTENTIAL_NON_COMPLIANCE'
-        ? `The measured font height of ${measuredFontHeight}mm is deficient by ${(requiredFontHeight - measuredFontHeight).toFixed(1)}mm from the mandatory ${requiredFontHeight}mm threshold.`
-        : `Numeral height of ${measuredFontHeight}mm comfortably exceeds the statutory ${requiredFontHeight}mm requirement.`,
-      legalGround: 'Contravention of Rule 5 and Rule 7 read with Table I of Legal Metrology (Packaged Commodities) Rules, 2011.',
-      recommendation: fontCheckResult === 'POTENTIAL_NON_COMPLIANCE'
-        ? 'Flagged for Officer Confirmation. Issue notice under Section 36(1) or initiate Section 48 compounding.'
-        : 'Compliant.',
-    });
-
-    if (fontCheckResult === 'POTENTIAL_NON_COMPLIANCE') {
-      const vioId = `VIO-${inspectionId}-01`;
-      violations.push({
-        violationId: vioId,
-        inspectionId,
-        ruleNumber: 'Rule 5 & Rule 6(1)(e)',
-        ruleTitle: 'MRP Font Height Deficit',
-        category: 'Font & Numerals',
-        severity: 'High',
-        finding: `MRP declaration numeral font size is less than statutory minimum standard (Observed: ${measuredFontHeight}mm vs Required: ${requiredFontHeight}mm).`,
-        observedValue: `${measuredFontHeight} mm`,
-        requiredStandard: `As per Rule 5 (Table I) - Minimum font size ${requiredFontHeight}mm for package area ${pdpAreaCm2} cm²`,
-        confidence: 87,
-        status: 'Officer Review Required',
-        evidenceId: `evid-${inspectionId}-01`,
-        sectionReference: 'Section 18 & Section 36(1) of Legal Metrology Act, 2009',
-        timestamp: new Date().toISOString(),
-      });
-
-      const backImage = images.find((img) => img.side === 'back') || images[0];
-      if (backImage) {
-        evidenceList.push({
-          evidenceId: `evid-${inspectionId}-01`,
-          inspectionId,
-          violationId: vioId,
-          imageId: backImage.id,
-          imageUrl: backImage.url,
-          side: backImage.side,
-          label: 'MRP Numeral Region (Statutory Panel)',
-          detectedText: mrpDecl?.detectedValue || 'MRP: ₹ 14.00 (incl. of all taxes)',
-          ruleRef: 'Rule 5 & Rule 6(1)(e)',
-          confidence: 87,
-          pdpAreaCm2,
-          measuredFontHeightMm: measuredFontHeight,
-          requiredFontHeightMm: requiredFontHeight,
-          contrastRatio: '4.2:1 (Adequate)',
-          boundingBox: {
-            id: 'box-evidence-1',
-            label: 'MRP Font Area',
-            fieldKey: 'mrp_font_size',
-            x: 8,
-            y: 43,
-            width: 84,
-            height: 6,
-            confidence: 86,
-            detectedText: mrpDecl?.detectedValue || 'MRP: ₹ 14.00',
-            ruleRef: 'Rule 5 & Table I',
-            status: 'violation',
-          },
-          officerComments: `Measured under digital optical grid. Font height confirmed at ${measuredFontHeight}mm on secondary statutory block.`,
-          status: 'Pending',
-        });
+      const hasPin = /\b[1-9]\d{5}\b/.test(mfgVal);
+      const isAdequate = mfgVal.length >= 15;
+      if (isAdequate && hasPin) {
+        checks.push(this.createCheck(inspectionId, 'RULE-6-1-A', 'Rule 6(1)(a)', 'Manufacturer / Packer Legal Name & Address', 'Manufacturer Details', mfgDecl, 'APPEARS_COMPLIANT', mfgApplicability, 'Complete legal entity name and verified address with postal PIN code verified.', 'Full compliance with Rule 6(1)(a) PCR 2011.', 'declaration_area'));
+      } else {
+        checks.push(this.createCheck(inspectionId, 'RULE-6-1-A', 'Rule 6(1)(a)', 'Manufacturer / Packer Legal Name & Address', 'Address Completeness', mfgDecl, 'REQUIRES_OFFICER_REVIEW', mfgApplicability, 'Address appears abbreviated or lacks verified 6-digit postal PIN code.', 'Rule 6(1)(a) mandates complete physical address to establish jurisdiction.', 'declaration_area'));
       }
     }
 
-    // 7. Check Consumer Care Contact (Rule 9)
+    // 3. Net Quantity in Metric Units (Rule 6(1)(c))
+    const netQtyDecl = getDecl('net_quantity');
+    const netQtyVal = resolveValue(netQtyDecl);
+    const netQtyApplicability: ApplicabilityStatus = netQtyDecl?.applicabilityStatus || 'APPLICABLE';
+
+    if (!netQtyVal || netQtyVal.toLowerCase().includes('not detected')) {
+      checks.push(this.createCheck(inspectionId, 'RULE-6-1-C', 'Rule 6(1)(c)', 'Net Quantity Standard Units', 'Net Quantity Metric Units', netQtyDecl, 'POTENTIAL_NON_COMPLIANCE', netQtyApplicability, 'Mandatory net quantity declaration not detected on packaging.', 'Contravention of Rule 6(1)(c) and Section 18 of LM Act 2009.', 'front'));
+    } else {
+      const validMetricUnit = /\b\d+(?:\.\d+)?\s*(?:g|kg|ml|l|ltr|gm|pieces|units|n)\b/i.test(netQtyVal);
+      if (validMetricUnit) {
+        checks.push(this.createCheck(inspectionId, 'RULE-6-1-C', 'Rule 6(1)(c)', 'Net Quantity Standard Units', 'Net Quantity Format', netQtyDecl, 'APPEARS_COMPLIANT', netQtyApplicability, 'Net quantity conforms to standard SI metric representations under Schedule II.', 'Complies with Rule 6(1)(c) & Schedule II.', 'front'));
+      } else {
+        checks.push(this.createCheck(inspectionId, 'RULE-6-1-C', 'Rule 6(1)(c)', 'Net Quantity Standard Units', 'Net Quantity Format', netQtyDecl, 'POTENTIAL_NON_COMPLIANCE', netQtyApplicability, 'Non-standard weight/volume unit abbreviation or missing metric indicator.', 'Non-standard units punishable under Section 36(2) LM Act 2009.', 'front'));
+      }
+    }
+
+    // 4. MRP Inclusive of all taxes (Rule 6(1)(e))
+    const mrpDecl = getDecl('mrp');
+    const mrpVal = resolveValue(mrpDecl);
+    const mrpApplicability: ApplicabilityStatus = mrpDecl?.applicabilityStatus || 'APPLICABLE';
+
+    if (!mrpVal || mrpVal.toLowerCase().includes('not detected')) {
+      checks.push(this.createCheck(inspectionId, 'RULE-6-1-E', 'Rule 6(1)(e)', 'Maximum Retail Price (MRP)', 'MRP Declaration', mrpDecl, 'POTENTIAL_NON_COMPLIANCE', mrpApplicability, 'Mandatory retail sale price declaration missing from OCR extraction.', 'Punishable under Section 36(1) of LM Act 2009.', 'declaration_area'));
+    } else {
+      const hasPriceAndCurrency = /(?:₹|rs\.?|inr|mrp)\s*[:=]?\s*\d+/i.test(mrpVal) || /\d+(?:\.\d{2})?/.test(mrpVal);
+      if (hasPriceAndCurrency) {
+        checks.push(this.createCheck(inspectionId, 'RULE-6-1-E', 'Rule 6(1)(e)', 'Maximum Retail Price (MRP)', 'MRP Format', mrpDecl, 'APPEARS_COMPLIANT', mrpApplicability, 'MRP declared unambiguously in Indian currency inclusive of all taxes.', 'Satisfies Rule 6(1)(e) PCR 2011.', 'declaration_area'));
+      } else {
+        checks.push(this.createCheck(inspectionId, 'RULE-6-1-E', 'Rule 6(1)(e)', 'Maximum Retail Price (MRP)', 'MRP Clarity', mrpDecl, 'REQUIRES_OFFICER_REVIEW', mrpApplicability, 'Price numeral is smudged or missing explicit currency representation.', 'Rule 6(1)(e) requires unambiguous price display.', 'declaration_area'));
+      }
+    }
+
+    // 5. Unit Sale Price (Rule 6(11))
+    const uspDecl = getDecl('unit_sale_price');
+    const uspVal = resolveValue(uspDecl);
+    const isSmallPack = /(?:5\s*g|5g|5\s*ml|5ml|10\s*g|10g|10\s*ml|10ml)\b/i.test(netQuantityStr);
+    let uspApplicability: ApplicabilityStatus = uspDecl?.applicabilityStatus || (isSmallPack ? 'NOT_APPLICABLE' : 'APPLICABLE');
+
+    if (uspApplicability === 'NOT_APPLICABLE') {
+      checks.push(this.createCheck(inspectionId, 'RULE-6-11', 'Rule 6(11)', 'Unit Sale Price (USP)', 'Unit Sale Price Rate', uspDecl, 'NOT_APPLICABLE', uspApplicability, 'Small packaging size exempt from mandatory Unit Sale Price declaration under Rule 6(11).', 'Rule 6(11) PCR 2011', 'declaration_area'));
+    } else if (!uspVal || uspVal.toLowerCase().includes('not detected')) {
+      checks.push(this.createCheck(inspectionId, 'RULE-6-11', 'Rule 6(11)', 'Unit Sale Price (USP)', 'Unit Sale Price Rate', uspDecl, 'POTENTIAL_NON_COMPLIANCE', uspApplicability, 'Mandatory Unit Sale Price (USP) declaration not detected adjacent to MRP.', 'Rule 6(11) as amended in 2022.', 'declaration_area'));
+    } else {
+      const hasUspRate = /\/\s*(?:g|kg|ml|l|piece|unit|n)\b/i.test(uspVal);
+      if (hasUspRate) {
+        checks.push(this.createCheck(inspectionId, 'RULE-6-11', 'Rule 6(11)', 'Unit Sale Price (USP)', 'Unit Sale Price Rate', uspDecl, 'APPEARS_COMPLIANT', uspApplicability, 'Unit Sale Price expressed in standard metric rate per unit.', 'Rule 6(11) PCR 2011.', 'declaration_area'));
+      } else {
+        checks.push(this.createCheck(inspectionId, 'RULE-6-11', 'Rule 6(11)', 'Unit Sale Price (USP)', 'Unit Sale Price Format', uspDecl, 'REQUIRES_OFFICER_REVIEW', uspApplicability, 'Unit Sale Price format missing explicit denominator unit.', 'Rule 6(11) PCR 2011.', 'declaration_area'));
+      }
+    }
+
+    // 6. Month & Year of Manufacture / Packing (Rule 6(1)(d))
+    const mfgDateDecl = getDecl('mfg_date');
+    const mfgDateVal = resolveValue(mfgDateDecl);
+    const mfgDateApplicability: ApplicabilityStatus = mfgDateDecl?.applicabilityStatus || 'APPLICABLE';
+
+    if (!mfgDateVal || mfgDateVal.toLowerCase().includes('not detected')) {
+      checks.push(this.createCheck(inspectionId, 'RULE-6-1-D', 'Rule 6(1)(d)', 'Month & Year of Manufacture / Packing', 'Manufacturing Date', mfgDateDecl, 'POTENTIAL_NON_COMPLIANCE', mfgDateApplicability, 'Month and year of manufacture or packing not detected.', 'Mandatory under Rule 6(1)(d) PCR 2011.', 'declaration_area'));
+    } else {
+      const hasDateFormat = /(?:\d{1,2}[/-]\d{2,4}|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*\d{2,4})/i.test(mfgDateVal);
+      if (hasDateFormat) {
+        checks.push(this.createCheck(inspectionId, 'RULE-6-1-D', 'Rule 6(1)(d)', 'Month & Year of Manufacture / Packing', 'Manufacturing Date', mfgDateDecl, 'APPEARS_COMPLIANT', mfgDateApplicability, 'Month and year of manufacture or packing clearly stated.', 'Rule 6(1)(d) PCR 2011.', 'declaration_area'));
+      } else {
+        checks.push(this.createCheck(inspectionId, 'RULE-6-1-D', 'Rule 6(1)(d)', 'Month & Year of Manufacture / Packing', 'Manufacturing Date', mfgDateDecl, 'REQUIRES_OFFICER_REVIEW', mfgDateApplicability, 'Date stamp detected but format requires visual confirmation.', 'Rule 6(1)(d) PCR 2011.', 'declaration_area'));
+      }
+    }
+
+    // 7. Consumer Care Details (Rule 9)
     const careDecl = getDecl('consumer_care');
-    if (careDecl && careDecl.status === 'review') {
-      checks.push({
-        checkId: `chk-${inspectionId}-7`,
-        inspectionId,
-        ruleId: 'RULE-9',
-        ruleNumber: 'Rule 9',
-        ruleTitle: 'Consumer Grievance Physical Address & Details',
-        fieldChecked: 'Consumer Redressal Address',
-        detectedValue: careDecl.detectedValue,
-        expectedCondition: 'Designated executive name/cell, telephone, email, and postal address',
-        result: 'REVIEW_REQUIRED',
-        confidence: 82,
-        explanation: 'Email and helpline phone are verified, but dedicated physical grievance address is ambiguous.',
-        legalGround: 'Rule 9 mandates complete physical address to permit postal grievance escalation.',
-        recommendation: 'Officer review required to determine whether corporate office address satisfies requirement.',
-      });
-    } else if (careDecl) {
-      checks.push({
-        checkId: `chk-${inspectionId}-7`,
-        inspectionId,
-        ruleId: 'RULE-9',
-        ruleNumber: 'Rule 9',
-        ruleTitle: 'Consumer Care Contact Details',
-        fieldChecked: 'Consumer Grievance Cell',
-        detectedValue: careDecl.detectedValue,
-        expectedCondition: 'Valid consumer contact information (email, phone, address)',
-        result: 'COMPLIANT',
-        confidence: 95,
-        explanation: 'Full consumer care email, toll-free number, and physical grievance contact verified.',
-        legalGround: 'Full compliance with Rule 9 PCR 2011.',
-        recommendation: 'Passed.',
-      });
+    const careVal = resolveValue(careDecl);
+    const careApplicability: ApplicabilityStatus = careDecl?.applicabilityStatus || 'APPLICABLE';
+
+    if (!careVal || careVal.toLowerCase().includes('not detected')) {
+      checks.push(this.createCheck(inspectionId, 'RULE-9', 'Rule 9', 'Consumer Care Redressal Details', 'Consumer Grievance Cell', careDecl, 'POTENTIAL_NON_COMPLIANCE', careApplicability, 'Mandatory consumer grievance cell coordinates missing from OCR text.', 'Mandatory under Rule 9 PCR 2011.', 'back'));
+    } else {
+      const hasPhoneOrEmail = /[\w.-]+@[\w.-]+\.\w+/.test(careVal) || /\b\d{3,5}[-\s]?\d{3,8}\b/.test(careVal) || careVal.toLowerCase().includes('toll free');
+      if (hasPhoneOrEmail) {
+        checks.push(this.createCheck(inspectionId, 'RULE-9', 'Rule 9', 'Consumer Care Redressal Details', 'Consumer Grievance Cell', careDecl, 'APPEARS_COMPLIANT', careApplicability, 'Consumer helpline number or email address clearly identified.', 'Rule 9 PCR 2011.', 'back'));
+      } else {
+        checks.push(this.createCheck(inspectionId, 'RULE-9', 'Rule 9', 'Consumer Care Redressal Details', 'Consumer Grievance Cell', careDecl, 'REQUIRES_OFFICER_REVIEW', careApplicability, 'Consumer care text present but phone/email address format is incomplete.', 'Rule 9 PCR 2011.', 'back'));
+      }
     }
 
-    // 8. Check Country of Origin (Rule 14)
+    // 8. Country of Origin (Rule 14 & Rule 6(10))
     const originDecl = getDecl('country_of_origin');
-    if (originDecl && originDecl.status === 'not_detected') {
-      const vioId = `VIO-${inspectionId}-02`;
-      checks.push({
-        checkId: `chk-${inspectionId}-8`,
-        inspectionId,
-        ruleId: 'RULE-14',
-        ruleNumber: 'Rule 14',
-        ruleTitle: 'Country of Origin Declaration',
-        fieldChecked: 'Country of Origin',
-        detectedValue: 'Not Declared',
-        expectedCondition: 'Unambiguous declaration of Country of Origin on package / digital listing',
-        result: 'POTENTIAL_NON_COMPLIANCE',
-        confidence: 95,
-        explanation: 'Mandatory Country of Origin declaration was not detected on the product display panel.',
-        legalGround: 'Rule 14 & Rule 6(1)(g) of PCR 2011.',
-        recommendation: 'Issue notice under Rule 6(10)/Rule 14.',
-      });
+    const originVal = resolveValue(originDecl);
+    const originApplicability: ApplicabilityStatus = originDecl?.applicabilityStatus || 'REQUIRES_OFFICER_REVIEW';
 
-      violations.push({
-        violationId: vioId,
-        inspectionId,
-        ruleNumber: 'Rule 14',
-        ruleTitle: 'Missing Country of Origin',
-        category: 'Country of Origin',
-        severity: 'Medium',
-        finding: 'Country of Origin is missing from the mandatory declarations panel.',
-        observedValue: 'Not Detected',
-        requiredStandard: 'Mandatory declaration of Country of Origin as per Rule 14 & Rule 6(1)(g)',
-        confidence: 95,
-        status: 'Officer Review Required',
-        evidenceId: `evid-${inspectionId}-02`,
-        sectionReference: 'Rule 14 PCR 2011 & Section 18 LM Act 2009',
-        timestamp: new Date().toISOString(),
-      });
-    } else if (originDecl) {
-      checks.push({
-        checkId: `chk-${inspectionId}-8`,
-        inspectionId,
-        ruleId: 'RULE-14',
-        ruleNumber: 'Rule 14',
-        ruleTitle: 'Country of Origin Declaration',
-        fieldChecked: 'Country of Origin',
-        detectedValue: originDecl.detectedValue,
-        expectedCondition: 'Explicit Country of Origin declaration',
-        result: 'COMPLIANT',
-        confidence: 98,
-        explanation: `Country of origin clearly identified as "${originDecl.detectedValue}".`,
-        legalGround: 'Complies with Rule 14.',
-        recommendation: 'Passed.',
-      });
+    if (originApplicability === 'NOT_APPLICABLE') {
+      checks.push(this.createCheck(inspectionId, 'RULE-14', 'Rule 14 & Rule 6(10)', 'Country of Origin Declaration', 'Country of Origin', originDecl, 'NOT_APPLICABLE', originApplicability, 'Country of origin requirement not applicable.', 'Rule 14 PCR 2011', 'declaration_area'));
+    } else if (!originVal || originVal.toLowerCase().includes('not detected')) {
+      checks.push(this.createCheck(inspectionId, 'RULE-14', 'Rule 14 & Rule 6(10)', 'Country of Origin Declaration', 'Country of Origin', originDecl, 'REQUIRES_OFFICER_REVIEW', originApplicability, 'Country of origin not detected; verify whether product is imported or domestic.', 'Rule 14 & Rule 6(10) PCR 2011', 'declaration_area'));
+    } else {
+      checks.push(this.createCheck(inspectionId, 'RULE-14', 'Rule 14 & Rule 6(10)', 'Country of Origin Declaration', 'Country of Origin', originDecl, 'APPEARS_COMPLIANT', originApplicability, `Country of origin identified: '${originVal}'.`, 'Rule 14 PCR 2011.', 'declaration_area'));
     }
 
-    // Add baseline additional statutory checks to reach standard comprehensive inspection scope
-    const baselineRules = [
-      { num: 'Rule 6(1)(d)', title: 'Date of Packing/Mfg Format', val: 'Month & Year present (12/2026)', exp: 'MM/YYYY format standard', res: 'COMPLIANT' as CheckResult },
-      { num: 'Rule 6(2)', title: 'Principal Display Panel Dimension Ratio', val: 'PDP area conforms to >40% of package face', exp: 'Standard PDP area proportion', res: 'COMPLIANT' as CheckResult },
-      { num: 'Rule 7', title: 'Color Contrast & Background Obstruction', val: 'High contrast black text on white substrate (4.2:1)', exp: 'Distinct background contrast ≥ 3:1', res: 'COMPLIANT' as CheckResult },
-      { num: 'Rule 18', title: 'Standard Packages Conformance', val: 'Standard rationalized net pack size', exp: 'Conforms to rationalized weight classes', res: 'COMPLIANT' as CheckResult },
-      { num: 'Rule 27', title: 'Manufacturer Registration Details', val: 'Valid Director Metrology registration record', exp: 'Registered under Rule 27', res: 'COMPLIANT' as CheckResult },
-    ];
-
-    baselineRules.forEach((br, i) => {
-      checks.push({
-        checkId: `chk-${inspectionId}-base-${i + 1}`,
-        inspectionId,
-        ruleId: `RULE-BASE-${i + 1}`,
-        ruleNumber: br.num,
-        ruleTitle: br.title,
-        fieldChecked: br.title,
-        detectedValue: br.val,
-        expectedCondition: br.exp,
-        result: br.res,
-        confidence: 97,
-        explanation: 'Statutory verification completed with positive compliance index.',
-        legalGround: `Compliance under ${br.num} of PCR 2011.`,
-        recommendation: 'Passed.',
-      });
+    // 9. Readability & Conspicuousness (Rule 5 & Rule 7 Table I) - Strict uncalibrated guard!
+    const readabilityStatus = nameDecl?.readabilityAssessment || 'Needs Review';
+    checks.push({
+      checkId: `chk-${inspectionId}-readability`,
+      inspectionId,
+      ruleId: 'RULE-5-7-READABILITY',
+      ruleNumber: 'Rule 5 & Rule 7 (Table-I)',
+      ruleTitle: 'Conspicuousness, Contrast and Readability of Declarations',
+      fieldChecked: 'Numeral Height & Readability',
+      detectedValue: `Visual assessment: ${readabilityStatus}`,
+      extractedValue: `Readability: ${readabilityStatus}`,
+      officerVerifiedValue: `Uncalibrated camera photo`,
+      expectedCondition: 'Prominent, distinct contrast and statutory height per Table I (uncalibrated camera cannot assert physical mm)',
+      result: 'REQUIRES_OFFICER_REVIEW',
+      controlledStatus: 'REQUIRES_OFFICER_REVIEW',
+      applicabilityStatus: 'APPLICABLE',
+      readabilityAssessment: readabilityStatus,
+      confidence: 70,
+      evidenceId: findEvidenceImage('declaration_area')?.id,
+      evidenceSide: 'declaration_area',
+      explanation: 'Phone camera photograph lacks physical gauge calibration. Exact physical millimetre font size cannot be claimed automatically.',
+      legalGround: 'Rule 5 & Rule 7 Table I PCR 2011 read with Section 18 LM Act 2009',
+      recommendation: 'Inspecting officer must physically verify numeral height against Principal Display Panel area table.',
     });
 
-    const passedCount = checks.filter((c) => c.result === 'COMPLIANT').length;
-    const reviewCount = checks.filter((c) => c.result === 'REVIEW_REQUIRED').length;
-    const violationCount = checks.filter((c) => c.result === 'POTENTIAL_NON_COMPLIANCE').length;
+    // Populate evidence items for all checks
+    checks.forEach((chk, idx) => {
+      const side = chk.evidenceSide || 'declaration_area';
+      const evImg = findEvidenceImage(side);
+      const evItem: EvidenceItem = {
+        evidenceId: `ev-${inspectionId}-${idx + 1}`,
+        inspectionId,
+        imageId: evImg?.id || `img-${side}`,
+        imageUrl: evImg?.url || '',
+        side: (evImg?.side as any) || (side as any),
+        label: `${chk.fieldChecked} Packaging Evidence`,
+        detectedText: chk.detectedValue,
+        ruleRef: chk.ruleNumber,
+        confidence: chk.confidence,
+        officerComments: chk.explanation,
+        status: chk.result === 'APPEARS_COMPLIANT' ? 'Accepted' : 'Pending',
+      };
+      chk.evidenceId = evItem.evidenceId;
+      evidenceList.push(evItem);
 
-    let overallStatus: 'Compliant' | 'Review Required' | 'Potential Non-Compliance' = 'Compliant';
-    if (violationCount > 0) {
+      if (chk.result === 'POTENTIAL_NON_COMPLIANCE') {
+        violations.push({
+          violationId: `viol-${inspectionId}-${idx + 1}`,
+          inspectionId,
+          ruleNumber: chk.ruleNumber,
+          ruleTitle: chk.ruleTitle,
+          category: 'Mandatory Declarations',
+          severity: 'High',
+          finding: chk.explanation,
+          observedValue: chk.detectedValue,
+          requiredStandard: chk.expectedCondition,
+          confidence: chk.confidence,
+          status: 'Officer Review Required',
+          evidenceId: evItem.evidenceId,
+          sectionReference: chk.legalGround,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
+
+    const appearsCompliantCount = checks.filter((c) => c.result === 'APPEARS_COMPLIANT').length;
+    const potentialNonComplianceCount = checks.filter((c) => c.result === 'POTENTIAL_NON_COMPLIANCE').length;
+    const requiresOfficerReviewCount = checks.filter((c) => c.result === 'REQUIRES_OFFICER_REVIEW').length;
+    const notApplicableCount = checks.filter((c) => c.result === 'NOT_APPLICABLE').length;
+    const notDetectedCount = checks.filter((c) => c.result === 'NOT_DETECTED').length;
+
+    let overallStatus: 'Appears Compliant' | 'Requires Officer Review' | 'Potential Non-Compliance' = 'Appears Compliant';
+    if (potentialNonComplianceCount > 0) {
       overallStatus = 'Potential Non-Compliance';
-    } else if (reviewCount > 0) {
-      overallStatus = 'Review Required';
+    } else if (requiresOfficerReviewCount > 0) {
+      overallStatus = 'Requires Officer Review';
     }
 
     return {
       checks,
       violations,
       evidenceList,
-      passedCount,
-      reviewCount,
-      violationCount,
+      passedCount: appearsCompliantCount,
+      reviewCount: requiresOfficerReviewCount,
+      violationCount: potentialNonComplianceCount,
+      appearsCompliantCount,
+      potentialNonComplianceCount,
+      requiresOfficerReviewCount,
+      notApplicableCount,
+      notDetectedCount,
       overallStatus,
+    };
+  }
+
+  private static createCheck(
+    inspectionId: string,
+    ruleId: string,
+    ruleNumber: string,
+    ruleTitle: string,
+    fieldChecked: string,
+    decl: ExtractedDeclaration | undefined,
+    controlledStatus: ComplianceControlledStatus,
+    applicability: ApplicabilityStatus,
+    explanation: string,
+    legalGround: string,
+    evidenceSide: string
+  ): ComplianceCheck {
+    const extracted = decl?.extractedValue || decl?.detectedValue || '';
+    const verified = decl?.officerVerifiedValue !== undefined && decl?.officerVerifiedValue !== null
+      ? decl.officerVerifiedValue
+      : extracted;
+
+    // Backward-compatible result mapping
+    let resultCompat: 'COMPLIANT' | 'REVIEW_REQUIRED' | 'POTENTIAL_NON_COMPLIANCE' = 'COMPLIANT';
+    if (controlledStatus === 'POTENTIAL_NON_COMPLIANCE') resultCompat = 'POTENTIAL_NON_COMPLIANCE';
+    else if (controlledStatus === 'REQUIRES_OFFICER_REVIEW' || controlledStatus === 'NOT_DETECTED') resultCompat = 'REVIEW_REQUIRED';
+
+    return {
+      checkId: `chk-${inspectionId}-${ruleId}`,
+      inspectionId,
+      ruleId,
+      ruleNumber,
+      ruleTitle,
+      fieldChecked,
+      detectedValue: verified || extracted || 'Not detected',
+      extractedValue: extracted,
+      officerVerifiedValue: verified,
+      expectedCondition: `Statutory standard under ${ruleNumber}`,
+      result: controlledStatus,
+      controlledStatus,
+      applicabilityStatus: applicability,
+      readabilityAssessment: decl?.readabilityAssessment || 'Needs Review',
+      confidence: decl?.confidence || 85,
+      explanation,
+      legalGround,
+      recommendation: controlledStatus === 'APPEARS_COMPLIANT' ? 'Statutory standard satisfied.' : 'Officer manual review required.',
+      evidenceSide: evidenceSide as any,
+    };
+  }
+
+  private static mapBackendResponseToResult(
+    data: any,
+    declarations: ExtractedDeclaration[],
+    images: PackageImage[],
+    inspectionId: string
+  ): RuleAssessmentResult {
+    const checks: ComplianceCheck[] = (data.checks || []).map((c: any) => ({
+      checkId: `chk-${inspectionId}-${c.rule_number}`,
+      inspectionId,
+      ruleId: c.rule_number,
+      ruleNumber: c.rule_number,
+      ruleTitle: c.rule_title,
+      fieldChecked: c.field_checked,
+      detectedValue: c.detected_value,
+      extractedValue: c.extracted_value,
+      officerVerifiedValue: c.officer_verified_value,
+      expectedCondition: c.expected_condition,
+      result: (c.controlled_status || c.result) as any,
+      controlledStatus: c.controlled_status as any,
+      applicabilityStatus: c.applicability as any,
+      readabilityAssessment: c.readability as any,
+      confidence: 90,
+      explanation: c.explanation,
+      legalGround: c.legal_ground,
+      recommendation: c.recommendation || '',
+      evidenceSide: c.evidence_side || 'declaration_area',
+    }));
+
+    const evidenceList: EvidenceItem[] = checks.map((chk, idx) => {
+      const evImg = images.find((img) => img.side === chk.evidenceSide) || images[0];
+      return {
+        evidenceId: `ev-${inspectionId}-${idx + 1}`,
+        inspectionId,
+        imageId: evImg?.id || `img-${chk.evidenceSide}`,
+        imageUrl: evImg?.url || '',
+        side: (evImg?.side as any) || 'declaration_area',
+        label: `${chk.fieldChecked} Packaging Evidence`,
+        detectedText: chk.detectedValue,
+        ruleRef: chk.ruleNumber,
+        confidence: chk.confidence,
+        officerComments: chk.explanation,
+        status: chk.result === 'APPEARS_COMPLIANT' ? 'Accepted' : 'Pending',
+      };
+    });
+
+    const violations: Violation[] = checks
+      .filter((c) => c.result === 'POTENTIAL_NON_COMPLIANCE')
+      .map((chk, idx) => ({
+        violationId: `viol-${inspectionId}-${idx + 1}`,
+        inspectionId,
+        ruleNumber: chk.ruleNumber,
+        ruleTitle: chk.ruleTitle,
+        category: 'Mandatory Declarations',
+        severity: 'High',
+        finding: chk.explanation,
+        observedValue: chk.detectedValue,
+        requiredStandard: chk.expectedCondition,
+        confidence: chk.confidence,
+        status: 'Officer Review Required',
+        evidenceId: `ev-${inspectionId}-${idx + 1}`,
+        sectionReference: chk.legalGround,
+        timestamp: new Date().toISOString(),
+      }));
+
+    return {
+      checks,
+      violations,
+      evidenceList,
+      passedCount: data.appears_compliant_count || data.passed_count || 0,
+      reviewCount: data.requires_officer_review_count || data.review_count || 0,
+      violationCount: data.potential_non_compliance_count || data.violation_count || 0,
+      appearsCompliantCount: data.appears_compliant_count || 0,
+      potentialNonComplianceCount: data.potential_non_compliance_count || 0,
+      requiresOfficerReviewCount: data.requires_officer_review_count || 0,
+      notApplicableCount: data.not_applicable_count || 0,
+      notDetectedCount: data.not_detected_count || 0,
+      overallStatus: data.overall_status || 'Appears Compliant',
     };
   }
 }

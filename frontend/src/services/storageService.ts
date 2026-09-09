@@ -1,34 +1,30 @@
 import { Inspection, ProductCatalogItem, Officer } from '../types';
-import { INITIAL_INSPECTIONS_DATABASE, PRODUCT_CATALOG_ITEMS } from '../data/mockProducts';
 
 const STORAGE_KEYS = {
-  INSPECTIONS: 'sih26034_inspections',
-  PRODUCTS: 'sih26034_products',
-  OFFICER: 'sih26034_current_officer',
-  SETTINGS: 'sih26034_settings',
-  FIREBASE_CONFIG: 'sih26034_firebase_config',
+  INSPECTIONS: 'inspectiq_inspections',
+  PRODUCTS: 'inspectiq_products',
+  OFFICER: 'inspectiq_current_officer',
+  AUTH_SESSION: 'inspectiq_auth_session',
+  SETTINGS: 'inspectiq_settings',
 };
 
 export class StorageService {
   /**
-   * Initialize local repository if empty
+   * Initialize local repository - clean initial state without fake mock inspections
    */
   public static init(): void {
     if (!localStorage.getItem(STORAGE_KEYS.INSPECTIONS)) {
-      localStorage.setItem(STORAGE_KEYS.INSPECTIONS, JSON.stringify(INITIAL_INSPECTIONS_DATABASE));
-    }
-    if (!localStorage.getItem(STORAGE_KEYS.PRODUCTS)) {
-      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(PRODUCT_CATALOG_ITEMS));
+      localStorage.setItem(STORAGE_KEYS.INSPECTIONS, JSON.stringify([]));
     }
   }
 
   public static getInspections(): Inspection[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.INSPECTIONS);
-      if (!data) return INITIAL_INSPECTIONS_DATABASE;
+      if (!data) return [];
       return JSON.parse(data);
     } catch {
-      return INITIAL_INSPECTIONS_DATABASE;
+      return [];
     }
   }
 
@@ -39,7 +35,9 @@ export class StorageService {
 
   public static saveInspection(inspection: Inspection): void {
     const list = this.getInspections();
-    const existingIndex = list.findIndex((item) => item.id === inspection.id || item.inspectionNumber === inspection.inspectionNumber);
+    const existingIndex = list.findIndex(
+      (item) => item.id === inspection.id || item.inspectionNumber === inspection.inspectionNumber
+    );
 
     if (existingIndex >= 0) {
       list[existingIndex] = {
@@ -51,35 +49,15 @@ export class StorageService {
     }
 
     localStorage.setItem(STORAGE_KEYS.INSPECTIONS, JSON.stringify(list));
-    this.updateProductFromInspection(inspection);
   }
 
   public static getProducts(): ProductCatalogItem[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
-      if (!data) return PRODUCT_CATALOG_ITEMS;
+      if (!data) return [];
       return JSON.parse(data);
     } catch {
-      return PRODUCT_CATALOG_ITEMS;
-    }
-  }
-
-  public static updateProductFromInspection(inspection: Inspection): void {
-    const products = this.getProducts();
-    const prod = products.find(
-      (p) => p.productName.toLowerCase().includes(inspection.brand.toLowerCase()) ||
-             inspection.productName.toLowerCase().includes(p.brand.toLowerCase())
-    );
-
-    if (prod) {
-      prod.lastInspectionDate = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-      prod.lastInspectionId = inspection.inspectionNumber;
-      prod.complianceStatus = inspection.status;
-      prod.inspectionCount += 1;
-      if (inspection.violations.length > 0) {
-        prod.violationsCount += inspection.violations.length;
-      }
-      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(products));
+      return [];
     }
   }
 
@@ -97,13 +75,31 @@ export class StorageService {
       badgeNumber: 'LM-ENF-7821',
       zone: 'North Zone (HQ)',
       state: 'Delhi (NCT)',
-      email: 'r.sharma@legalmetrology.gov.in',
+      email: 'r.sharma@inspectiq.legalmetrology.gov.in',
       role: 'Enforcement Officer',
     };
   }
 
   public static setCurrentOfficer(officer: Officer): void {
     localStorage.setItem(STORAGE_KEYS.OFFICER, JSON.stringify(officer));
+  }
+
+  public static getAuthSession(): { officerId: string; email: string; token: string } | null {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.AUTH_SESSION);
+      if (data) return JSON.parse(data);
+    } catch {
+      // fallback
+    }
+    return null;
+  }
+
+  public static setAuthSession(session: { officerId: string; email: string; token: string }): void {
+    localStorage.setItem(STORAGE_KEYS.AUTH_SESSION, JSON.stringify(session));
+  }
+
+  public static clearAuthSession(): void {
+    localStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
   }
 }
 

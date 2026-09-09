@@ -1,17 +1,66 @@
 export type InspectionType = 'physical' | 'ecommerce';
 
+export type PremisesType = 
+  | 'Retail Store'
+  | 'Supermarket / Hypermarket'
+  | 'Wholesale Dealer'
+  | 'Warehouse / Godown'
+  | 'E-Commerce Fulfillment Center'
+  | 'Manufacturing Unit'
+  | 'Other';
+
+export type InspectionPurpose = 
+  | 'Routine Market Surveillance'
+  | 'Consumer Complaint'
+  | 'Re-Verification'
+  | 'Special Enforcement Drive'
+  | 'Random Spot Check';
+
 export type ComplianceStatus = 
   | 'Compliant'
   | 'Review Required'
   | 'Potential Non-Compliance'
   | 'Under Review'
-  | 'Notice Issued';
+  | 'Notice Issued'
+  | 'Pending';
+
+export type ComplianceControlledStatus = 
+  | 'APPEARS_COMPLIANT'
+  | 'POTENTIAL_NON_COMPLIANCE'
+  | 'REQUIRES_OFFICER_REVIEW'
+  | 'NOT_APPLICABLE'
+  | 'NOT_DETECTED';
+
+export type ApplicabilityStatus = 
+  | 'APPLICABLE'
+  | 'NOT_APPLICABLE'
+  | 'REQUIRES_OFFICER_REVIEW'
+  | 'NOT_DETECTED';
+
+export type ReadabilityAssessmentStatus = 
+  | 'Acceptable'
+  | 'Needs Review'
+  | 'Not Assessable';
 
 export type CheckResult = 'COMPLIANT' | 'REVIEW_REQUIRED' | 'POTENTIAL_NON_COMPLIANCE';
 
 export type ViolationSeverity = 'High' | 'Medium' | 'Low';
 
-export type PackageSide = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'screenshot' | 'listing_pdp';
+export type PackageSide = 
+  | 'front' 
+  | 'back' 
+  | 'side' 
+  | 'left' 
+  | 'right' 
+  | 'top' 
+  | 'bottom' 
+  | 'declaration_area' 
+  | 'additional_evidence' 
+  | 'screenshot' 
+  | 'listing_pdp'
+  | 'other';
+
+export type ImageCategory = 'front' | 'back' | 'side' | 'declaration_area' | 'additional_evidence';
 
 export interface Officer {
   id: string;
@@ -43,7 +92,7 @@ export interface PackageImage {
   id: string;
   side: PackageSide;
   label: string;
-  url: string; // Persistent Base64 or Blob URL of ACTUAL captured/uploaded image
+  url: string; // Persistent Base64 or Blob URL of captured/uploaded image
   capturedAt: string;
   captureMethod?: 'camera' | 'upload';
   qualityStatus?: 'Ready' | 'Retake Required';
@@ -54,6 +103,46 @@ export interface PackageImage {
   lightingScore: 'Optimal' | 'Sub-optimal' | 'Poor';
   textVisibilityScore: 'Crisp' | 'Adequate' | 'Degraded';
   boundingBoxes: BoundingBox[];
+  description?: string;
+  linkedFindingIds?: string[];
+  timestamp?: string;
+  resolution?: string;
+}
+
+export interface ImageQualityAnalysis {
+  hasImage: boolean;
+  width: number;
+  height: number;
+  blurStatus: 'clear' | 'may_be_blurry' | 'blurry';
+  brightnessStatus: 'optimal' | 'too_dark' | 'too_bright';
+  usabilityStatus: 'ready' | 'retake_recommended';
+  message: string;
+  avgBrightness: number;
+  contrastScore: number;
+}
+
+export type OcrProcessingState = 
+  | 'ready'
+  | 'processing'
+  | 'success'
+  | 'failed'
+  | 'requires_retake'
+  | 'not_configured';
+
+export interface ProductDetails {
+  productName: string;
+  brand: string;
+  category: string;
+  specifications?: string;
+  netQuantity?: string;
+  batchNumber?: string;
+  manufacturingDate?: string;
+  expiryDate?: string;
+  manufacturerDetails?: string;
+  mrp?: string;
+  unitSalePrice?: string;
+  countryOfOrigin?: string;
+  consumerCare?: string;
 }
 
 export interface ExtractedDeclaration {
@@ -61,6 +150,11 @@ export interface ExtractedDeclaration {
   fieldKey: string;
   fieldName: string;
   detectedValue: string;
+  rawOcrText?: string;
+  extractedValue?: string;
+  officerVerifiedValue?: string;
+  applicabilityStatus?: ApplicabilityStatus;
+  readabilityAssessment?: ReadabilityAssessmentStatus;
   normalizedValue?: string;
   confidence: number; // 0-100
   status: 'detected' | 'review' | 'not_detected';
@@ -98,12 +192,20 @@ export interface ComplianceCheck {
   ruleTitle: string;
   fieldChecked: string;
   detectedValue: string;
+  extractedValue?: string;
+  officerVerifiedValue?: string;
   expectedCondition: string;
-  result: CheckResult;
+  result: CheckResult | ComplianceControlledStatus;
+  controlledStatus?: ComplianceControlledStatus;
+  applicabilityStatus?: ApplicabilityStatus;
+  readabilityAssessment?: ReadabilityAssessmentStatus;
   confidence: number;
   evidenceId?: string;
+  evidenceIds?: string[];
+  evidenceSide?: PackageSide;
   explanation: string;
   legalGround: string;
+  statutoryProvision?: string;
   recommendation: string;
   officerStatus?: 'Verified' | 'Overridden' | 'Pending';
   officerRemarks?: string;
@@ -147,13 +249,15 @@ export interface EvidenceItem {
 }
 
 export interface OfficerDecision {
-  decision: 'Compliant' | 'Non-Compliant' | 'Needs Clarification' | 'Requires Further Review' | 'Potential Non-Compliance' | 'Compoundable Notice (Sec 48)' | 'Regular Notice (Sec 36)';
+  decision: 'Appears Compliant' | 'Requires Further Review' | 'Potential Non-Compliance' | 'Compliant' | 'Non-Compliant' | 'Needs Clarification' | 'Compoundable Notice (Sec 48)' | 'Regular Notice (Sec 36)';
   remarks: string;
   officerName: string;
   designation: string;
   officerId: string;
   decisionTimestamp: string;
   digitalSignatureRef: string;
+  finalDecision?: string;
+  reviewedAt?: string;
   compoundableFeeEstimate?: string;
   noticeRefNumber?: string;
 }
@@ -175,7 +279,7 @@ export interface IdentifiedProduct {
   countryOfOrigin?: string;
   visibleText?: string[];
   confidence?: number;
-  source: 'AI Identification' | 'Product Search' | 'Manual Entry';
+  source: 'Catalog Search' | 'Product Search' | 'Manual Entry' | 'Package Inspection';
   status: 'Confirmed' | 'Needs Confirmation' | 'Pending';
 }
 
@@ -184,8 +288,9 @@ export interface LocationData {
   longitude?: number;
   accuracy?: number; // meters
   timestamp?: string;
-  status: 'Acquired' | 'Denied' | 'Unavailable' | 'Manual' | 'Awaiting Capture';
+  status: 'Detecting' | 'Captured' | 'Acquired' | 'Denied' | 'Unavailable' | 'Manual' | 'Awaiting Capture' | 'Confirmed';
   resolvedAddress?: string;
+  isConfirmed?: boolean;
 }
 
 export interface QualityGateResult {
@@ -193,6 +298,7 @@ export interface QualityGateResult {
   issue?: string;
   checkedAt: string;
   evaluatedSides: PackageSide[];
+  analysis?: ImageQualityAnalysis;
 }
 
 export interface Inspection {
@@ -201,12 +307,18 @@ export interface Inspection {
   createdAt: string;
   updatedAt: string;
   inspectionType: InspectionType;
+  inspectionPurpose?: InspectionPurpose;
   
-  // Location & Premises (Stored separately)
+  // Location & Premises
   locationData?: LocationData;
   premisesName?: string;
+  premisesType?: PremisesType;
   premisesAddress?: string;
   retailerGstin?: string;
+  officerRemarks?: string;
+
+  // Manual Product Details (Stage 2)
+  productDetails?: ProductDetails;
 
   // Product Identification
   identifiedProduct?: IdentifiedProduct;
@@ -225,6 +337,10 @@ export interface Inspection {
   // Quality Assessment
   qualityAssessment?: QualityGateResult;
 
+  // OCR Extraction State (Stage 2)
+  rawOcrText?: string;
+  ocrStatus?: OcrProcessingState;
+
   // Officer Details
   officerId: string;
   officerName: string;
@@ -232,6 +348,11 @@ export interface Inspection {
   
   // Inspection State & Findings
   status: ComplianceStatus;
+  systemAssessment?: string;
+  finalDecision?: string;
+  reviewedAt?: string;
+  reviewChecklist?: Record<string, boolean>;
+  reportGeneratedAt?: string;
   overallConfidence: number;
   images: PackageImage[];
   declarations: ExtractedDeclaration[];

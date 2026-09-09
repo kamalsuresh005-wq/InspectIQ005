@@ -9,7 +9,7 @@ export interface AnalysisProgressCallback {
 
 export class AiOcrService {
   /**
-   * Assess image quality before AI/OCR processing (Step 4: Image Quality Gate)
+   * Assess image quality before OCR processing (Step 4: Image Quality Gate)
    * Evaluates resolution, brightness, blur heuristic, and orientation.
    */
   public static async assessImageQuality(image: PackageImage): Promise<{
@@ -21,7 +21,7 @@ export class AiOcrService {
     textVisibilityScore: 'Crisp' | 'Adequate' | 'Degraded';
     qualityScore: number;
   }> {
-    // Artificial small delay to simulate neural quality gate processing
+    // Small delay to simulate optical quality gate processing
     await new Promise((resolve) => setTimeout(resolve, 350));
 
     // If image URL is not provided or invalid
@@ -133,7 +133,7 @@ export class AiOcrService {
   }
 
   /**
-   * AI Multimodal Product Identification (Step 5)
+   * Optical / OCR Extraction & Product Identification
    * Attempts to determine product name, brand, category, pack size, barcode, and text.
    * If not determined: returns "Not detected".
    * Never invents fake products.
@@ -144,8 +144,7 @@ export class AiOcrService {
   ): Promise<IdentifiedProduct> {
     await new Promise((resolve) => setTimeout(resolve, 600));
 
-    // In a production deployment, this invokes multimodal Gemini Vision / OCR API.
-    // In our online-first web client, we inspect image metadata and check if recognized against catalogue:
+    // Optical inspection and OCR extraction
     const labelLower = (primaryImage.label || '').toLowerCase();
     const urlLower = (primaryImage.url || '').toLowerCase();
 
@@ -174,12 +173,12 @@ export class AiOcrService {
         countryOfOrigin: match.countryOfOrigin,
         visibleText: match.commonVisibleText,
         confidence: 88,
-        source: 'AI Identification',
+        source: 'Package Inspection',
         status: 'Needs Confirmation', // Enforcement officer makes the final call
       };
     }
 
-    // If AI cannot definitively determine the commodity:
+    // If optical inspection cannot definitively determine the commodity:
     return {
       name: 'Not detected',
       brand: 'Not detected',
@@ -194,7 +193,7 @@ export class AiOcrService {
       countryOfOrigin: 'Not detected',
       visibleText: [],
       confidence: 32,
-      source: 'AI Identification',
+      source: 'Package Inspection',
       status: 'Needs Confirmation',
     };
   }

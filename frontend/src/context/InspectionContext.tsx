@@ -10,12 +10,17 @@ import {
   ComplianceStatus,
   IdentifiedProduct,
   LocationData,
-  QualityGateResult 
+  QualityGateResult,
+  PremisesType,
+  InspectionPurpose,
+  ProductDetails,
+  OcrProcessingState,
+  ApplicabilityStatus,
+  ComplianceControlledStatus
 } from '../types';
 import { StorageService } from '../services/storageService';
 import { AiOcrService } from '../services/aiOcrService';
 import { RuleEngineService } from '../services/ruleEngineService';
-import { PRODUCT_CATALOGUE, searchCatalogue } from '../data/productCatalogue';
 
 export type NavigationTab = 
   | 'dashboard'
@@ -27,23 +32,33 @@ export type NavigationTab =
   | 'rules'
   | 'analytics'
   | 'users'
-  | 'settings';
+  | 'settings'
+  | 'profile';
 
 export type InspectionFlowStep = 
   | 'new_inspection'
   | 'location'
+  | 'package_capture'
+  | 'image_quality'
+  | 'product_details'
+  | 'ocr_extraction'
+  | 'declaration_verification'
+  | 'compliance_analysis'
+  | 'evidence_findings'
+  | 'evidence'
+  | 'officer_review'
+  | 'final_decision'
+  | 'report'
+  | 'completion'
+  | 'inspection_details'
+  // Backward-compatible step aliases
   | 'capture'
   | 'quality_check'
   | 'ai_identification'
   | 'product_search'
   | 'product_confirmation'
-  | 'ocr_extraction'
-  | 'compliance_analysis'
   | 'finding_detail'
   | 'officer_verification'
-  | 'completion'
-  | 'report'
-  // Legacy aliases for backward compatibility
   | 'create'
   | 'scan'
   | 'ecommerce_input'
@@ -52,8 +67,58 @@ export type InspectionFlowStep =
   | 'compliance'
   | 'readability'
   | 'violations'
-  | 'evidence'
   | 'verification';
+
+const createEmptyInspection = (officer: Officer, type: 'physical' | 'ecommerce' = 'physical'): Inspection => {
+  const year = new Date().getFullYear();
+  const randSeq = Math.floor(100000 + Math.random() * 900000);
+  const inspNum = `INSP-${year}-${randSeq}`;
+
+  return {
+    id: inspNum.toLowerCase(),
+    inspectionNumber: inspNum,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    inspectionType: type,
+    inspectionPurpose: 'Routine Market Surveillance',
+    locationData: {
+      status: 'Awaiting Capture',
+      isConfirmed: false,
+    },
+    premisesName: '',
+    premisesType: 'Retail Store',
+    premisesAddress: '',
+    officerRemarks: '',
+    productName: 'Pending Capture',
+    brand: 'Pending Capture',
+    category: 'Packaged Commodity',
+    subCategory: 'Retail SKU',
+    mrp: '',
+    netQuantity: '',
+    manufacturerName: '',
+    retailerName: '',
+    location: '',
+    officerId: officer.id,
+    officerName: officer.name,
+    officerDesignation: officer.designation,
+    status: 'Pending',
+    overallConfidence: 0,
+    images: [],
+    declarations: [],
+    complianceChecks: [],
+    violations: [],
+    evidenceList: [],
+    reviewChecklist: {
+      locationVerified: false,
+      productConfirmed: false,
+      photosReviewed: false,
+      ocrVerified: false,
+      declarationsReviewed: false,
+      findingsReviewed: false,
+      evidenceExamined: false,
+    },
+  };
+};
 
 interface InspectionContextType {
   // Navigation & Auth
@@ -61,7 +126,7 @@ interface InspectionContextType {
   setActiveTab: (tab: NavigationTab) => void;
   isLoggedIn: boolean;
   currentUser: Officer;
-  login: (officerId: string, email: string) => void;
+  login: (officerId: string, email: string) => boolean;
   logout: () => void;
   
   // Data Repositories
@@ -72,11 +137,19 @@ interface InspectionContextType {
   setFlowStep: (step: InspectionFlowStep) => void;
   
   // Workflow Actions
-  startNewInspection: (type: 'physical' | 'ecommerce', presetId?: string) => void;
+  startNewInspection: (type?: 'physical' | 'ecommerce', presetId?: string) => void;
   updateInspectionMetadata: (fields: Partial<Inspection>) => void;
   runAiPipeline: () => Promise<void>;
   updateLocationData: (data: Partial<LocationData>) => void;
-  updatePremises: (premisesName: string, address?: string, gstin?: string) => void;
+  confirmLocation: () => void;
+  updatePremises: (
+    premisesName: string, 
+    premisesType?: PremisesType, 
+    address?: string, 
+    officerRemarks?: string,
+    purpose?: InspectionPurpose,
+    gstin?: string
+  ) => void;
   addImage: (image: PackageImage) => void;
   updateImageQuality: (imageId: string, status: 'Ready' | 'Retake Required', issue?: string) => void;
   removeImage: (imageId: string) => void;
@@ -84,8 +157,21 @@ interface InspectionContextType {
   runAiIdentification: () => Promise<IdentifiedProduct>;
   setConfirmedProduct: (product: IdentifiedProduct) => void;
   runOcrExtraction: () => Promise<void>;
-  updateDeclaration: (id: string, updatedValue: string, status?: 'detected' | 'review' | 'not_detected') => void;
-  overrideComplianceCheck: (checkId: string, result: 'COMPLIANT' | 'REVIEW_REQUIRED' | 'POTENTIAL_NON_COMPLIANCE', remarks: string) => void;
+  isValidatingRules: boolean;
+  validationError: string | null;
+  runComplianceValidation: () => Promise<void>;
+  updateDeclaration: (
+    id: string, 
+    updatedValue: string, 
+    status?: 'detected' | 'review' | 'not_detected',
+    applicabilityStatus?: ApplicabilityStatus
+  ) => void;
+  updateDeclarationApplicability: (id: string, applicabilityStatus: ApplicabilityStatus) => void;
+  overrideComplianceCheck: (
+    checkId: string, 
+    result: ComplianceControlledStatus | 'COMPLIANT' | 'REVIEW_REQUIRED' | 'POTENTIAL_NON_COMPLIANCE', 
+    remarks: string
+  ) => void;
   selectEvidence: (evidence: EvidenceItem) => void;
   selectedEvidence: EvidenceItem | null;
   selectedFinding: any | null;
@@ -93,15 +179,28 @@ interface InspectionContextType {
   updateEvidenceStatus: (evidenceId: string, status: 'Accepted' | 'Rejected' | 'Needs Re-inspection', comments?: string) => void;
   submitOfficerDecision: (decision: OfficerDecision) => void;
   viewExistingInspection: (inspectionId: string, targetStep?: InspectionFlowStep) => void;
+  updateProductDetails: (details: ProductDetails) => void;
+  updateRawOcrText: (text: string, status?: OcrProcessingState) => void;
+  updateDeclarationsList: (declarations: ExtractedDeclaration[]) => void;
   completeCurrentInspection: () => void;
+  deleteEvidenceImage: (imageId: string) => void;
+  updateEvidenceDescription: (imageId: string, description: string) => void;
+  linkEvidenceToFinding: (imageId: string, findingId: string) => void;
+  addAdditionalEvidenceImage: (image: PackageImage) => void;
+  updateOfficerRemarks: (remarks: string) => void;
+  updateReviewChecklist: (itemKey: string, checked: boolean) => void;
+  submitFinalDecision: (
+    finalDecision: 'APPEARS_COMPLIANT' | 'REQUIRES_FURTHER_REVIEW' | 'POTENTIAL_NON_COMPLIANCE', 
+    remarks: string
+  ) => void;
 }
 
 const InspectionContext = createContext<InspectionContextType | undefined>(undefined);
 
 export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(true);
   const [currentUser, setCurrentUser] = useState<Officer>(StorageService.getCurrentOfficer());
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => StorageService.getAuthSession() !== null);
+  const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
   const [inspections, setInspections] = useState<Inspection[]>(StorageService.getInspections());
   const [products, setProducts] = useState<ProductCatalogItem[]>(StorageService.getProducts());
   
@@ -109,112 +208,57 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [currentInspection, setCurrentInspection] = useState<Inspection>(() => {
     const list = StorageService.getInspections();
     if (list.length > 0) return list[0];
-    
-    // Default initial inspection state
-    return {
-      id: 'insp-2026-0902-101',
-      inspectionNumber: 'INSP-2026-0902-101',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      inspectionType: 'physical',
-      locationData: { status: 'Awaiting Capture' },
-      premisesName: '',
-      premisesAddress: '',
-      productName: 'Awaiting Capture',
-      brand: 'Awaiting Capture',
-      category: 'Packaged Commodity',
-      subCategory: 'Retail SKU',
-      mrp: 'Not captured',
-      netQuantity: 'Not captured',
-      manufacturerName: 'Awaiting OCR detection',
-      retailerName: 'Not recorded',
-      location: 'Not acquired',
-      officerId: 'OFF-DEL-408',
-      officerName: 'R. Sharma',
-      officerDesignation: 'Legal Metrology Enforcement Officer',
-      status: 'Under Review',
-      overallConfidence: 0,
-      images: [],
-      declarations: [],
-      complianceChecks: [],
-      violations: [],
-      evidenceList: []
-    };
+    return createEmptyInspection(StorageService.getCurrentOfficer());
   });
   
   const [flowStep, setFlowStep] = useState<InspectionFlowStep>('new_inspection');
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceItem | null>(null);
   const [selectedFinding, setSelectedFinding] = useState<any | null>(null);
+  const [isValidatingRules, setIsValidatingRules] = useState<boolean>(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   // Sync with storage on mount
   useEffect(() => {
     const freshInspections = StorageService.getInspections();
-    if (freshInspections.length > 0) {
-      setInspections(freshInspections);
-    }
-    const freshProducts = StorageService.getProducts();
-    if (freshProducts.length > 0) {
-      setProducts(freshProducts);
-    }
+    setInspections(freshInspections);
   }, []);
 
-  const login = (officerId: string, email: string) => {
+  const login = (officerId: string, email: string): boolean => {
+    if (!officerId.trim() || !email.trim()) {
+      return false;
+    }
+
     const officer: Officer = {
-      id: officerId || 'OFF-DEL-408',
-      name: 'R. Sharma',
+      id: officerId.trim().toUpperCase(),
+      name: officerId.trim().toUpperCase() === 'OFF-DEL-408' ? 'R. Sharma' : `Officer ${officerId.trim()}`,
       designation: 'Legal Metrology Enforcement Officer',
-      badgeNumber: 'LM-ENF-7821',
-      zone: 'Central Enforcement Zone',
-      state: 'Delhi (NCT)',
-      email: email || 'r.sharma@inspectiq.legalmetrology.in',
+      badgeNumber: `LM-ENF-${Math.floor(1000 + Math.random() * 9000)}`,
+      zone: 'Enforcement Division',
+      state: 'State Department of Legal Metrology',
+      email: email.trim().toLowerCase(),
       role: 'Enforcement Officer',
     };
+
     setCurrentUser(officer);
     StorageService.setCurrentOfficer(officer);
+    StorageService.setAuthSession({
+      officerId: officer.id,
+      email: officer.email,
+      token: `token_${Date.now()}`
+    });
     setIsLoggedIn(true);
     setActiveTab('dashboard');
+    return true;
   };
 
   const logout = () => {
+    StorageService.clearAuthSession();
     setIsLoggedIn(false);
+    setActiveTab('dashboard');
   };
 
-  const startNewInspection = (type: 'physical' | 'ecommerce') => {
-    const count = inspections.length + 1;
-    const inspNum = `INSP-2026-0902-${100 + count}`;
-
-    const newInsp: Inspection = {
-      id: inspNum.toLowerCase(),
-      inspectionNumber: inspNum,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      inspectionType: type,
-      locationData: {
-        status: 'Awaiting Capture'
-      },
-      premisesName: '',
-      premisesAddress: '',
-      productName: 'Awaiting Capture',
-      brand: 'Awaiting Capture',
-      category: 'Packaged Commodity',
-      subCategory: 'Retail SKU',
-      mrp: 'Not captured',
-      netQuantity: 'Not captured',
-      manufacturerName: 'Awaiting OCR detection',
-      retailerName: '',
-      location: 'Location not acquired',
-      officerId: currentUser.id,
-      officerName: currentUser.name,
-      officerDesignation: currentUser.designation,
-      status: 'Under Review',
-      overallConfidence: 0,
-      images: [],
-      declarations: [],
-      complianceChecks: [],
-      violations: [],
-      evidenceList: []
-    };
-
+  const startNewInspection = (type: 'physical' | 'ecommerce' = 'physical', _presetId?: string) => {
+    const newInsp = createEmptyInspection(currentUser, type);
     setCurrentInspection(newInsp);
     setFlowStep('new_inspection');
     setActiveTab('new_inspection');
@@ -237,29 +281,53 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         status: data.status || prevLoc.status,
       };
 
+      const resolvedLocString = data.resolvedAddress 
+        || (data.latitude ? `${data.latitude.toFixed(5)}° N, ${data.longitude?.toFixed(5)}° E` : prev.location);
+
       return {
         ...prev,
         locationData: updatedLoc,
-        location: data.resolvedAddress || (data.latitude ? `GPS: ${data.latitude.toFixed(5)}, ${data.longitude?.toFixed(5)} (±${data.accuracy?.toFixed(1)}m)` : prev.location),
+        location: resolvedLocString,
         updatedAt: new Date().toISOString()
       };
     });
   };
 
-  const updatePremises = (premisesName: string, address?: string, gstin?: string) => {
+  const confirmLocation = () => {
     setCurrentInspection((prev) => ({
       ...prev,
-      premisesName,
-      retailerName: premisesName,
-      premisesAddress: address || prev.premisesAddress,
-      retailerGstin: gstin || prev.retailerGstin,
+      locationData: {
+        ...(prev.locationData || { status: 'Captured' }),
+        status: 'Confirmed',
+        isConfirmed: true,
+      },
+      updatedAt: new Date().toISOString()
+    }));
+  };
+
+  const updatePremises = (
+    premisesName: string, 
+    premisesType?: PremisesType, 
+    address?: string, 
+    officerRemarks?: string,
+    purpose?: InspectionPurpose,
+    gstin?: string
+  ) => {
+    setCurrentInspection((prev) => ({
+      ...prev,
+      premisesName: premisesName.trim(),
+      retailerName: premisesName.trim(),
+      premisesType: premisesType || prev.premisesType,
+      premisesAddress: address !== undefined ? address : prev.premisesAddress,
+      officerRemarks: officerRemarks !== undefined ? officerRemarks : prev.officerRemarks,
+      inspectionPurpose: purpose || prev.inspectionPurpose,
+      retailerGstin: gstin !== undefined ? gstin : prev.retailerGstin,
       updatedAt: new Date().toISOString()
     }));
   };
 
   const addImage = (image: PackageImage) => {
     setCurrentInspection((prev) => {
-      // Replace existing image for same side or append
       const existingIdx = prev.images.findIndex(img => img.side === image.side);
       let updatedImages: PackageImage[];
       if (existingIdx >= 0) {
@@ -290,6 +358,37 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       ...prev,
       images: prev.images.filter((img) => img.id !== imageId),
       updatedAt: new Date().toISOString()
+    }));
+  };
+
+  const updateProductDetails = (details: ProductDetails) => {
+    setCurrentInspection((prev) => ({
+      ...prev,
+      productDetails: details,
+      productName: details.productName,
+      brand: details.brand,
+      category: details.category,
+      mrp: details.mrp || prev.mrp,
+      netQuantity: details.netQuantity || prev.netQuantity,
+      batchNumber: details.batchNumber || prev.batchNumber,
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
+  const updateRawOcrText = (text: string, status?: OcrProcessingState) => {
+    setCurrentInspection((prev) => ({
+      ...prev,
+      rawOcrText: text,
+      ocrStatus: status || prev.ocrStatus || 'success',
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
+  const updateDeclarationsList = (declarations: ExtractedDeclaration[]) => {
+    setCurrentInspection((prev) => ({
+      ...prev,
+      declarations,
+      updatedAt: new Date().toISOString(),
     }));
   };
 
@@ -330,7 +429,7 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         name: 'Not detected',
         brand: 'Not detected',
         category: 'Not detected',
-        source: 'AI Identification',
+        source: 'Package Inspection',
         status: 'Needs Confirmation',
         confidence: 0
       };
@@ -378,7 +477,6 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       currentInspection.identifiedProduct
     );
 
-    // Evaluate Legal Metrology Rule Engine
     const ruleEvaluation = RuleEngineService.evaluateCompliance(
       result.declarations,
       result.updatedImages,
@@ -404,14 +502,63 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   };
 
-  const updateDeclaration = (id: string, updatedValue: string, status?: 'detected' | 'review' | 'not_detected') => {
+  const runComplianceValidation = async () => {
+    setIsValidatingRules(true);
+    setValidationError(null);
+    try {
+      // Simulate real verification pipeline processing
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const ruleEvaluation = await RuleEngineService.evaluateComplianceAsync(
+        currentInspection.declarations,
+        currentInspection.images,
+        currentInspection.inspectionNumber,
+        {
+          productName: currentInspection.productName,
+          category: currentInspection.category,
+          netQuantity: currentInspection.netQuantity,
+          mrp: currentInspection.mrp,
+        }
+      );
+
+      setCurrentInspection((prev) => ({
+        ...prev,
+        complianceChecks: ruleEvaluation.checks,
+        violations: ruleEvaluation.violations,
+        evidenceList: ruleEvaluation.evidenceList,
+        status: (ruleEvaluation.overallStatus === 'Potential Non-Compliance'
+          ? 'Potential Non-Compliance'
+          : ruleEvaluation.overallStatus === 'Requires Officer Review'
+          ? 'Review Required'
+          : 'Compliant') as ComplianceStatus,
+        updatedAt: new Date().toISOString(),
+      }));
+
+      if (ruleEvaluation.evidenceList.length > 0) {
+        setSelectedEvidence(ruleEvaluation.evidenceList[0]);
+      }
+    } catch {
+      setValidationError("Unable to complete compliance validation. Please review manually.");
+    } finally {
+      setIsValidatingRules(false);
+    }
+  };
+
+  const updateDeclaration = (
+    id: string, 
+    updatedValue: string, 
+    status?: 'detected' | 'review' | 'not_detected',
+    applicabilityStatus?: ApplicabilityStatus
+  ) => {
     setCurrentInspection((prev) => {
       const updatedDeclarations = prev.declarations.map((decl) => {
         if (decl.id === id) {
           return {
             ...decl,
             detectedValue: updatedValue,
+            officerVerifiedValue: updatedValue,
+            extractedValue: decl.extractedValue || decl.detectedValue,
             status: status || decl.status,
+            applicabilityStatus: applicabilityStatus || decl.applicabilityStatus || 'APPLICABLE',
             isEdited: true,
             originalValue: decl.originalValue || decl.detectedValue,
           };
@@ -419,7 +566,6 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         return decl;
       });
 
-      // Re-evaluate rules after manual officer edit
       const ruleEvaluation = RuleEngineService.evaluateCompliance(
         updatedDeclarations,
         prev.images,
@@ -434,7 +580,47 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         complianceChecks: ruleEvaluation.checks,
         violations: ruleEvaluation.violations,
         evidenceList: ruleEvaluation.evidenceList,
-        status: ruleEvaluation.overallStatus as ComplianceStatus,
+        status: (ruleEvaluation.overallStatus === 'Potential Non-Compliance'
+          ? 'Potential Non-Compliance'
+          : ruleEvaluation.overallStatus === 'Requires Officer Review'
+          ? 'Review Required'
+          : 'Compliant') as ComplianceStatus,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+  };
+
+  const updateDeclarationApplicability = (id: string, applicabilityStatus: ApplicabilityStatus) => {
+    setCurrentInspection((prev) => {
+      const updatedDeclarations = prev.declarations.map((decl) => {
+        if (decl.id === id) {
+          return {
+            ...decl,
+            applicabilityStatus,
+          };
+        }
+        return decl;
+      });
+
+      const ruleEvaluation = RuleEngineService.evaluateCompliance(
+        updatedDeclarations,
+        prev.images,
+        prev.inspectionNumber,
+        prev.netQuantity,
+        224
+      );
+
+      return {
+        ...prev,
+        declarations: updatedDeclarations,
+        complianceChecks: ruleEvaluation.checks,
+        violations: ruleEvaluation.violations,
+        evidenceList: ruleEvaluation.evidenceList,
+        status: (ruleEvaluation.overallStatus === 'Potential Non-Compliance'
+          ? 'Potential Non-Compliance'
+          : ruleEvaluation.overallStatus === 'Requires Officer Review'
+          ? 'Review Required'
+          : 'Compliant') as ComplianceStatus,
         updatedAt: new Date().toISOString(),
       };
     });
@@ -442,7 +628,7 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const overrideComplianceCheck = (
     checkId: string, 
-    result: 'COMPLIANT' | 'REVIEW_REQUIRED' | 'POTENTIAL_NON_COMPLIANCE', 
+    result: ComplianceControlledStatus | 'COMPLIANT' | 'REVIEW_REQUIRED' | 'POTENTIAL_NON_COMPLIANCE', 
     remarks: string
   ) => {
     setCurrentInspection((prev) => {
@@ -451,6 +637,7 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           return {
             ...c,
             result,
+            controlledStatus: result as any,
             officerStatus: 'Overridden' as const,
             officerRemarks: remarks,
           };
@@ -459,7 +646,7 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
 
       const hasViolations = updatedChecks.some((c) => c.result === 'POTENTIAL_NON_COMPLIANCE');
-      const hasReviews = updatedChecks.some((c) => c.result === 'REVIEW_REQUIRED');
+      const hasReviews = updatedChecks.some((c) => c.result === 'REQUIRES_OFFICER_REVIEW' || c.result === 'REVIEW_REQUIRED');
       const overallStatus: ComplianceStatus = hasViolations 
         ? 'Potential Non-Compliance' 
         : hasReviews 
@@ -499,11 +686,32 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const submitOfficerDecision = (decision: OfficerDecision) => {
     setCurrentInspection((prev) => {
+      let finalStatus: ComplianceStatus = 'Compliant';
+      if (
+        decision.decision === 'Potential Non-Compliance' || 
+        decision.decision === 'Non-Compliant' || 
+        decision.decision === 'Compoundable Notice (Sec 48)' || 
+        decision.decision === 'Regular Notice (Sec 36)'
+      ) {
+        finalStatus = 'Notice Issued';
+      } else if (
+        decision.decision === 'Requires Further Review' || 
+        decision.decision === 'Needs Clarification'
+      ) {
+        finalStatus = 'Review Required';
+      } else {
+        finalStatus = 'Compliant';
+      }
+
       const updated: Inspection = {
         ...prev,
-        officerDecision: decision,
+        officerDecision: {
+          ...decision,
+          finalDecision: decision.decision,
+          reviewedAt: decision.reviewedAt || new Date().toISOString(),
+        },
         remarks: decision.remarks,
-        status: decision.decision === 'Compliant' ? 'Compliant' : 'Notice Issued',
+        status: finalStatus,
         updatedAt: new Date().toISOString(),
       };
 
@@ -517,6 +725,146 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const refreshed = StorageService.getInspections();
     setInspections(refreshed);
     setFlowStep('completion');
+  };
+
+  const deleteEvidenceImage = (imageId: string) => {
+    removeImage(imageId);
+  };
+
+  const updateEvidenceDescription = (imageId: string, description: string) => {
+    setCurrentInspection((prev) => ({
+      ...prev,
+      images: prev.images.map((img) =>
+        img.id === imageId ? { ...img, description } : img
+      ),
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
+  const linkEvidenceToFinding = (imageId: string, findingId: string) => {
+    setCurrentInspection((prev) => {
+      const updatedImages = prev.images.map((img) => {
+        if (img.id === imageId) {
+          const existing = img.linkedFindingIds || [];
+          const updated = existing.includes(findingId)
+            ? existing.filter((id) => id !== findingId)
+            : [...existing, findingId];
+          return { ...img, linkedFindingIds: updated };
+        }
+        return img;
+      });
+
+      const updatedChecks = prev.complianceChecks.map((c) => {
+        if (c.checkId === findingId) {
+          const existing = c.evidenceIds || [];
+          const updated = existing.includes(imageId)
+            ? existing.filter((id) => id !== imageId)
+            : [...existing, imageId];
+          return { ...c, evidenceIds: updated };
+        }
+        return c;
+      });
+
+      return {
+        ...prev,
+        images: updatedImages,
+        complianceChecks: updatedChecks,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+  };
+
+  const addAdditionalEvidenceImage = (image: PackageImage) => {
+    setCurrentInspection((prev) => ({
+      ...prev,
+      images: [...prev.images, image],
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
+  const updateOfficerRemarks = (remarks: string) => {
+    setCurrentInspection((prev) => ({
+      ...prev,
+      officerRemarks: remarks,
+      remarks,
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
+  const updateReviewChecklist = (itemKey: string, checked: boolean) => {
+    setCurrentInspection((prev) => ({
+      ...prev,
+      reviewChecklist: {
+        ...(prev.reviewChecklist || {}),
+        [itemKey]: checked,
+      },
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
+  const submitFinalDecision = (
+    finalDecision: 'APPEARS_COMPLIANT' | 'REQUIRES_FURTHER_REVIEW' | 'POTENTIAL_NON_COMPLIANCE',
+    remarks: string
+  ) => {
+    setCurrentInspection((prev) => {
+      let finalStatus: ComplianceStatus = 'Compliant';
+      if (finalDecision === 'POTENTIAL_NON_COMPLIANCE') {
+        finalStatus = 'Notice Issued';
+      } else if (finalDecision === 'REQUIRES_FURTHER_REVIEW') {
+        finalStatus = 'Review Required';
+      } else {
+        finalStatus = 'Compliant';
+      }
+
+      // Compute rule engine advisory assessment summary
+      const violationsCount = prev.complianceChecks.filter(
+        (c) => c.result === 'POTENTIAL_NON_COMPLIANCE' || c.controlledStatus === 'POTENTIAL_NON_COMPLIANCE'
+      ).length;
+      const reviewsCount = prev.complianceChecks.filter(
+        (c) => c.result === 'REQUIRES_OFFICER_REVIEW' || c.result === 'REVIEW_REQUIRED'
+      ).length;
+      const sysAssessment = violationsCount > 0
+        ? 'Potential Non-Compliance'
+        : reviewsCount > 0
+        ? 'Requires Officer Review'
+        : 'Appears Compliant';
+
+      const decisionRecord: OfficerDecision = {
+        decision: finalDecision === 'APPEARS_COMPLIANT' 
+          ? 'Appears Compliant'
+          : finalDecision === 'REQUIRES_FURTHER_REVIEW'
+          ? 'Requires Further Review'
+          : 'Potential Non-Compliance',
+        finalDecision: finalDecision === 'APPEARS_COMPLIANT'
+          ? 'Appears Compliant'
+          : finalDecision === 'REQUIRES_FURTHER_REVIEW'
+          ? 'Requires Further Review'
+          : 'Potential Non-Compliance',
+        remarks: remarks.trim() || `Authoritative statutory determination: ${finalDecision}.`,
+        officerName: currentUser.name,
+        designation: currentUser.designation,
+        officerId: currentUser.id,
+        decisionTimestamp: new Date().toISOString(),
+        reviewedAt: new Date().toISOString(),
+        digitalSignatureRef: `LM-DSC-${currentUser.id}-${Date.now().toString(36).toUpperCase()}`,
+      };
+
+      const updated: Inspection = {
+        ...prev,
+        officerDecision: decisionRecord,
+        systemAssessment: sysAssessment,
+        finalDecision: decisionRecord.decision,
+        reviewedAt: new Date().toISOString(),
+        officerRemarks: remarks.trim(),
+        remarks: remarks.trim(),
+        status: finalStatus,
+        updatedAt: new Date().toISOString(),
+      };
+
+      StorageService.saveInspection(updated);
+      setInspections(StorageService.getInspections());
+      return updated;
+    });
   };
 
   const viewExistingInspection = (inspectionId: string, targetStep: InspectionFlowStep = 'report') => {
@@ -546,6 +894,7 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         updateInspectionMetadata,
         runAiPipeline,
         updateLocationData,
+        confirmLocation,
         updatePremises,
         addImage,
         updateImageQuality,
@@ -554,7 +903,11 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         runAiIdentification,
         setConfirmedProduct,
         runOcrExtraction,
+        isValidatingRules,
+        validationError,
+        runComplianceValidation,
         updateDeclaration,
+        updateDeclarationApplicability,
         overrideComplianceCheck,
         selectEvidence,
         selectedEvidence,
@@ -563,7 +916,17 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         updateEvidenceStatus,
         submitOfficerDecision,
         viewExistingInspection,
+        updateProductDetails,
+        updateRawOcrText,
+        updateDeclarationsList,
         completeCurrentInspection,
+        deleteEvidenceImage,
+        updateEvidenceDescription,
+        linkEvidenceToFinding,
+        addAdditionalEvidenceImage,
+        updateOfficerRemarks,
+        updateReviewChecklist,
+        submitFinalDecision,
       }}
     >
       {children}

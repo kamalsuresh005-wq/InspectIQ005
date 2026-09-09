@@ -70,9 +70,9 @@ export class ReportService {
       </style>
       </head>
       <body>
-        <h1>GOVERNMENT OF INDIA</h1>
-        <h2>DEPARTMENT OF LEGAL METROLOGY • MINISTRY OF CONSUMER AFFAIRS</h2>
-        <p style="text-align: center; font-weight: bold; font-size: 13pt;">STATUTORY COMPLIANCE INSPECTION REPORT & NOTICE</p>
+        <h1>INSPECTIQ</h1>
+        <h2>PACKAGED COMMODITY INSPECTION REPORT</h2>
+        <p style="text-align: center; font-weight: bold; font-size: 11pt;">STATUTORY COMPLIANCE INSPECTION RECORD</p>
         <p style="text-align: center; font-size: 9pt; color: #666;">(Under Legal Metrology Act, 2009 & Legal Metrology (Packaged Commodities) Rules, 2011)</p>
         <hr/>
         
@@ -182,7 +182,7 @@ export class ReportService {
         <p><b>Date & Time:</b> ${new Date().toLocaleString('en-GB')}</p>
 
         <div class="footer">
-          <p>Official Statutory Document • Department of Legal Metrology, Ministry of Consumer Affairs, Food & Public Distribution, Government of India (SIH26034 Enforcement Intelligence).</p>
+          <p>InspectIQ Packaged Commodity Inspection System • Record of Statutory Inspection under Legal Metrology Act, 2009 & PCR 2011.</p>
         </div>
       </body>
       </html>

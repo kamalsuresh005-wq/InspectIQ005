@@ -51,3 +51,7 @@ Thumbs.db
 coverage/
 *.lcov
 .nyc_output/
+
+# OCR artifacts & TS build cache
+*.traineddata
+*.tsbuildinfo

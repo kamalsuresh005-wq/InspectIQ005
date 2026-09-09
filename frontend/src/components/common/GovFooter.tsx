@@ -14,9 +14,9 @@ export const GovFooter: React.FC = () => {
           </span>
         </div>
 
-        {/* Center Prototype Disclaimer */}
-        <div className="text-[11px] bg-amber-50 text-amber-900 border border-amber-200 px-2.5 py-1 rounded-md">
-          <strong className="font-semibold">SIH26034 Prototype System:</strong> AI provides compliance intelligence; final enforcement authority rests with the Legal Metrology Officer.
+        {/* Center Legal Metrology Principle */}
+        <div className="text-[11px] bg-[#E6F4F1] text-[#0F766E] border border-[#D9E1E8] px-2.5 py-1 rounded-md">
+          <strong className="font-semibold">InspectIQ:</strong> OCR extracts declarations · Rule engine validates compliance · Enforcement authority rests with the Legal Metrology Officer.
         </div>
 
         {/* Right Links */}

@@ -163,7 +163,7 @@ export const ProductSearchFallback: React.FC = () => {
         </div>
       </div>
 
-      {/* Back to AI Identification */}
+      {/* Back to Product Identification */}
       <div className="pt-3 safe-bottom">
         <button
           type="button"
@@ -171,7 +171,7 @@ export const ProductSearchFallback: React.FC = () => {
           className="w-full text-xs font-semibold text-slate-600 hover:text-slate-900 py-2 flex items-center justify-center gap-1.5"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
-          <span>Back to AI Identification</span>
+          <span>Back to Product Identification</span>
         </button>
       </div>
 

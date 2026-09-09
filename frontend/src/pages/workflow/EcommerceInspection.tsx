@@ -277,7 +277,7 @@ export const EcommerceInspection: React.FC = () => {
               <div>
                 <h4 className="text-xs font-bold text-slate-900">Upload Full-Page Marketplace Listing Screenshot</h4>
                 <p className="text-[10.5px] text-slate-500 mt-0.5">
-                  PNG, JPG or WebP. AI will OCR all mandatory specification tables and statutory disclaimers.
+                  PNG, JPG or WebP. OCR will extract all mandatory specification tables and statutory disclaimers.
                 </p>
               </div>
             </div>
@@ -288,7 +288,7 @@ export const EcommerceInspection: React.FC = () => {
                 <div className="text-xs">
                   <span className="font-bold text-slate-900 block">Screenshot Loaded for Optical Parsing</span>
                   <span className="text-emerald-800 font-semibold flex items-center gap-1 mt-0.5">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> Ready for AI Analysis
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Ready for OCR Extraction & Rule Analysis
                   </span>
                 </div>
               </div>

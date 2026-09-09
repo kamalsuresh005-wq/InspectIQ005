@@ -38,8 +38,8 @@ export const AiProductIdentification: React.FC = () => {
           <span className="text-[11px] font-bold text-blue-800 uppercase tracking-wider bg-blue-50 px-2 py-0.5 rounded">
             Step 5 of 12
           </span>
-          <h1 className="text-xl font-bold text-slate-900 mt-1">AI Product Identification</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Assistive neural identification of packaging evidence.</p>
+          <h1 className="text-xl font-bold text-slate-900 mt-1">Product Identification</h1>
+          <p className="text-xs text-slate-500 mt-0.5">Optical extraction and catalogue matching of packaging evidence.</p>
         </div>
 
         {/* Actual Captured Product Image */}
@@ -104,7 +104,7 @@ export const AiProductIdentification: React.FC = () => {
         <div className="p-2.5 bg-blue-50/70 border border-blue-200 rounded-lg text-[11px] text-blue-900 flex items-start gap-2">
           <AlertCircle className="w-3.5 h-3.5 text-blue-800 shrink-0 mt-0.5" />
           <span>
-            Assistive signal only. If AI failed or confidence is low, tap <strong>Search Product</strong>.
+            Optical reading signal. If unverified or manual entry is needed, tap <strong>Search Product</strong>.
           </span>
         </div>
       </div>

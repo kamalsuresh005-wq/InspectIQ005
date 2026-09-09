@@ -162,7 +162,7 @@ export const UsersRoles: React.FC = () => {
                 <td className="text-slate-400">—</td>
               </tr>
               <tr>
-                <td className="py-2 px-3 text-left font-medium text-slate-800">Override AI OCR Declarations</td>
+                <td className="py-2 px-3 text-left font-medium text-slate-800">Override OCR Declarations</td>
                 <td className="text-emerald-800 font-bold">✓</td>
                 <td className="text-emerald-800 font-bold">✓</td>
                 <td className="text-emerald-800 font-bold">✓</td>

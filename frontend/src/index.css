@@ -4,54 +4,45 @@
 
 @layer base {
   body {
-    background-color: #F8FAFC;
-    color: #0F172A;
-    font-family: 'Inter', sans-serif;
+    background-color: #F4F7FA;
+    color: #17212B;
+    font-family: 'Roboto', 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro', 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
 }
 
-/* High Contrast Accessibility Mode */
-.high-contrast {
-  filter: contrast(1.25) saturate(1.1);
-}
-
-.high-contrast body {
-  background-color: #000000 !important;
-  color: #FFFFFF !important;
-}
-
-.high-contrast .bg-white {
-  background-color: #121212 !important;
-  color: #FFFFFF !important;
-}
-
-/* Custom Scrollbar for Information-Rich Panels */
+/* Custom Scrollbar for Compact Field Interface */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #F1F5F9;
+  background: #F4F7FA;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #CBD5E1;
+  background: #D9E1E8;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94A3B8;
+  background: #52616F;
 }
 
-/* Print Specific Rules for Government Compliance Reports */
+/* Safe areas for mobile devices */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0.75rem);
+}
+
+/* Print Specific Rules for Formal Legal Metrology Inspection Reports */
 @media print {
   body {
     background: #FFFFFF !important;
-    color: #000000 !important;
+    color: #17212B !important;
   }
 
-  header, aside, footer, .print\:hidden {
+  header, aside, footer, nav, .print\:hidden {
     display: none !important;
   }
 
