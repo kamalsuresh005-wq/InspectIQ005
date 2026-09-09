@@ -8,7 +8,8 @@ import {
   XCircle, 
   FileCheck2, 
   Info,
-  Scale
+  Scale,
+  Loader2
 } from 'lucide-react';
 import { useInspection } from '../../context/InspectionContext';
 
@@ -45,15 +46,28 @@ export const FinalDecisionScreen: React.FC = () => {
 
   const [remarks, setRemarks] = useState<string>(currentInspection.officerRemarks || '');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [submitSuccess, setSubmitSuccess] = useState<boolean>(false);
 
-  const handleRecordDecision = () => {
+  const handleRecordDecision = async () => {
     if (!selectedDecision) {
       setErrorMsg('Please select an authoritative officer final decision to proceed.');
       return;
     }
 
-    submitFinalDecision(selectedDecision, remarks);
-    setFlowStep('report');
+    try {
+      setIsSubmitting(true);
+      setErrorMsg(null);
+      submitFinalDecision(selectedDecision, remarks);
+      setSubmitSuccess(true);
+      // Small pause to allow officer to see confirmation state before navigation
+      setTimeout(() => {
+        setFlowStep('report');
+      }, 500);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Unable to record final decision. Please try again.');
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -274,10 +288,25 @@ export const FinalDecisionScreen: React.FC = () => {
         <button
           type="button"
           onClick={handleRecordDecision}
-          className="w-2/3 bg-[#12304A] hover:bg-[#0B2239] active:scale-[0.99] text-white font-bold text-xs py-3 px-4 rounded-xl shadow-card transition-all flex items-center justify-center gap-2 cursor-pointer"
+          disabled={isSubmitting || submitSuccess}
+          className="w-2/3 bg-[#12304A] hover:bg-[#0B2239] active:scale-[0.99] disabled:opacity-75 disabled:cursor-not-allowed text-white font-bold text-xs py-3 px-4 rounded-xl shadow-card transition-all flex items-center justify-center gap-2 cursor-pointer"
         >
-          <FileCheck2 className="w-4 h-4" />
-          <span>Record Decision & Generate Report</span>
+          {isSubmitting ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+              <span>Generating inspection report...</span>
+            </>
+          ) : submitSuccess ? (
+            <>
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <span>✓ Report generated</span>
+            </>
+          ) : (
+            <>
+              <FileCheck2 className="w-4 h-4" />
+              <span>Record Decision & Generate Report</span>
+            </>
+          )}
         </button>
       </div>
 

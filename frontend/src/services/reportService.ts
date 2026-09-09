@@ -77,13 +77,16 @@ export class ReportService {
     };
 
     // Off-screen rendering container with exact A4 96-DPI dimensions (794px x 1123px per page)
+    // Placed in viewport with opacity 0 and pointer-events none so mobile browsers and html2canvas render reliably
     const container = document.createElement('div');
     container.id = 'pdf-render-container';
     container.style.position = 'fixed';
-    container.style.left = '-9999px';
+    container.style.left = '0';
     container.style.top = '0';
     container.style.width = '794px';
-    container.style.zIndex = '-1000';
+    container.style.opacity = '0';
+    container.style.pointerEvents = 'none';
+    container.style.zIndex = '-9999';
     container.style.backgroundColor = '#ffffff';
 
     const commonPageStyle = `
@@ -590,7 +593,587 @@ export class ReportService {
         pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
       }
 
-      pdf.save(`${filename}.pdf`);
+      const pdfBlob = pdf.output('blob');
+      if (!pdfBlob || pdfBlob.size === 0) {
+        throw new Error('PDF generation produced an empty file (0 bytes).');
+      }
+
+      // Safe cross-platform download using anchor and blob URL (reliable on mobile Chrome & HTTPS)
+      const blobUrl = URL.createObjectURL(pdfBlob);
+      const downloadLink = document.createElement('a');
+      downloadLink.href = blobUrl;
+      downloadLink.download = `${filename}.pdf`;
+      downloadLink.style.display = 'none';
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      setTimeout(() => {
+        if (document.body.contains(downloadLink)) {
+          document.body.removeChild(downloadLink);
+        }
+        URL.revokeObjectURL(blobUrl);
+      }, 1500);
+    } finally {
+      if (document.body.contains(container)) {
+        document.body.removeChild(container);
+      }
+    }
+  }
+
+  /**
+   * Generates a validated application/pdf Blob and Blob URL for viewing or direct embedding.
+   */
+  public static async generateInspectionPdfBlob(inspection: Inspection): Promise<{ blob: Blob; url: string }> {
+    const formattedDate = new Date(inspection.createdAt || Date.now()).toLocaleString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    const decisionLabel = formatStatusLabel(
+      inspection.finalDecision || inspection.officerDecision?.decision || inspection.status
+    );
+
+    const availableImages = (inspection.images || []).filter(
+      img => img && img.url && img.url.trim() !== ''
+    );
+
+    const viewsOrder = ['front', 'back', 'side', 'declaration_area', 'additional_evidence'];
+    const sortedImages = [...availableImages].sort((a, b) => {
+      const idxA = viewsOrder.indexOf(a.side);
+      const idxB = viewsOrder.indexOf(b.side);
+      return (idxA >= 0 ? idxA : 99) - (idxB >= 0 ? idxB : 99);
+    });
+
+    const declarations = inspection.declarations || [];
+    const complianceChecks = inspection.complianceChecks || [];
+
+    const getBadgeHtml = (statusStr: string) => {
+      const label = formatStatusLabel(statusStr);
+      let bg = '#F1F5F9';
+      let color = '#475569';
+      let border = '#CBD5E1';
+
+      if (label === 'Appears Compliant' || label === 'Verified' || label === 'Compliant') {
+        bg = '#E6F4F1';
+        color = '#0F766E';
+        border = '#A7F3D0';
+      } else if (label === 'Potential Non-Compliance' || label === 'Non-Compliant') {
+        bg = '#FEE2E2';
+        color = '#B91C1C';
+        border = '#FECACA';
+      } else if (label === 'Requires Officer Review' || label === 'Review Required') {
+        bg = '#FEF3C7';
+        color = '#92400E';
+        border = '#FDE68A';
+      } else if (label === 'Not Applicable') {
+        bg = '#F1F5F9';
+        color = '#64748B';
+        border = '#E2E8F0';
+      }
+
+      return `<span style="display:inline-block; padding: 2px 6px; font-size: 8.5px; font-weight: 700; border-radius: 4px; background-color: ${bg}; color: ${color}; border: 1px solid ${border}; white-space: normal; line-height: 1.2;">${label}</span>`;
+    };
+
+    const container = document.createElement('div');
+    container.id = 'pdf-blob-render-container';
+    container.style.position = 'fixed';
+    container.style.left = '0';
+    container.style.top = '0';
+    container.style.width = '794px';
+    container.style.opacity = '0';
+    container.style.pointerEvents = 'none';
+    container.style.zIndex = '-9999';
+    container.style.backgroundColor = '#ffffff';
+
+    const commonPageStyle = `
+      width: 794px;
+      height: 1123px;
+      box-sizing: border-box;
+      padding: 34px 40px;
+      background-color: #ffffff;
+      color: #12304A;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-size: 10.5px;
+      line-height: 1.35;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      overflow: hidden;
+    `;
+
+    const sectionHeaderStyle = `
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #12304A;
+      background-color: #F4F7FA;
+      padding: 3.5px 8px;
+      border-radius: 4px;
+      border-left: 3px solid #0F766E;
+      margin-bottom: 5px;
+    `;
+
+    const gridBoxStyle = `
+      border: 1px solid #D9E1E8;
+      border-radius: 6px;
+      padding: 7px 10px;
+      background-color: #ffffff;
+    `;
+
+    const tableStyle = `
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: 9.5px;
+      border: 1px solid #D9E1E8;
+      border-radius: 6px;
+      overflow: hidden;
+    `;
+
+    const thStyle = `
+      background-color: #F4F7FA;
+      color: #52616F;
+      font-weight: 700;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 6px 8px;
+      border-bottom: 1px solid #D9E1E8;
+      text-align: left;
+    `;
+
+    const tdStyle = `
+      padding: 5px 8px;
+      border-bottom: 1px solid #E2E8F0;
+      vertical-align: top;
+      word-break: break-word;
+      overflow-wrap: break-word;
+      line-height: 1.3;
+    `;
+
+    // PAGE 1
+    const page1Html = `
+      <div class="pdf-page" style="${commonPageStyle}">
+        <div>
+          <div style="border-bottom: 2px solid #12304A; padding-bottom: 10px; margin-bottom: 12px; text-align: center;">
+            <div style="font-size: 9px; font-weight: 700; color: #52616F; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 2px;">
+              Government of India • Department of Consumer Affairs
+            </div>
+            <div style="font-size: 17px; font-weight: 900; color: #12304A; letter-spacing: -0.02em; margin-bottom: 1px;">
+              INSPECTIQ
+            </div>
+            <div style="font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #0F766E; margin-bottom: 2px;">
+              Statutory Packaged Commodity Field Inspection Report
+            </div>
+            <div style="font-size: 9px; color: #52616F;">
+              Under Legal Metrology Act, 2009 &amp; Legal Metrology (Packaged Commodities) Rules, 2011
+            </div>
+          </div>
+
+          <div style="margin-bottom: 10px;">
+            <div style="${sectionHeaderStyle}">Section A: Inspection Particulars</div>
+            <div style="${gridBoxStyle}">
+              <table style="width: 100%; border-collapse: collapse; font-size: 10px; table-layout: fixed;">
+                <tr>
+                  <td style="width: 25%; padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Inspection ID</span>
+                    <strong style="color: #12304A; font-family: monospace; font-size: 10.5px;">${inspection.inspectionNumber}</strong>
+                  </td>
+                  <td style="width: 25%; padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Date &amp; Time</span>
+                    <span style="color: #12304A; font-weight: 600;">${formattedDate}</span>
+                  </td>
+                  <td style="width: 25%; padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Officer Name &amp; ID</span>
+                    <span style="color: #12304A; font-weight: 600;">${inspection.officerName} (${inspection.officerId})</span>
+                  </td>
+                  <td style="width: 25%; padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Designation &amp; Zone</span>
+                    <span style="color: #12304A; font-weight: 600;">${inspection.officerDesignation || 'Enforcement Officer'}</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Inspection Type</span>
+                    <span style="color: #12304A; text-transform: capitalize; font-weight: 600;">${inspection.inspectionType}</span>
+                  </td>
+                  <td colspan="3" style="padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Inspection Purpose</span>
+                    <span style="color: #12304A; font-weight: 600;">${inspection.inspectionPurpose || 'Routine Market Surveillance'}</span>
+                  </td>
+                </tr>
+              </table>
+            </div>
+          </div>
+
+          <div style="margin-bottom: 10px;">
+            <div style="${sectionHeaderStyle}">Section B: Premises Details</div>
+            <div style="${gridBoxStyle}">
+              <table style="width: 100%; border-collapse: collapse; font-size: 10px; table-layout: fixed;">
+                <tr>
+                  <td style="width: 45%; padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Premises / Establishment Name</span>
+                    <strong style="color: #12304A;">${inspection.premisesName || inspection.retailerName || 'Retail Facility'}</strong>
+                  </td>
+                  <td style="width: 25%; padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Premises Type</span>
+                    <span style="color: #12304A;">${inspection.premisesType || 'Retail Store'}</span>
+                  </td>
+                  <td style="width: 30%; padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">GSTIN / Identification</span>
+                    <span style="color: #12304A; font-family: monospace;">${inspection.retailerGstin || 'Not Recorded'}</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td colspan="3" style="padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Verified Inspection Location &amp; Coordinates</span>
+                    <span style="color: #12304A; font-weight: 600;">${inspection.location || inspection.premisesAddress || 'Verified on-site via device GPS'}</span>
+                  </td>
+                </tr>
+              </table>
+            </div>
+          </div>
+
+          <div style="margin-bottom: 10px;">
+            <div style="${sectionHeaderStyle}">Section C: Product Information</div>
+            <div style="${gridBoxStyle}">
+              <table style="width: 100%; border-collapse: collapse; font-size: 10px; table-layout: fixed;">
+                <tr>
+                  <td style="width: 35%; padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Product Name</span>
+                    <strong style="color: #12304A;">${inspection.productName}</strong>
+                  </td>
+                  <td style="width: 25%; padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Brand</span>
+                    <span style="color: #12304A; font-weight: 600;">${inspection.brand}</span>
+                  </td>
+                  <td style="width: 20%; padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Category</span>
+                    <span style="color: #12304A;">${inspection.category}</span>
+                  </td>
+                  <td style="width: 20%; padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Declared Net Qty</span>
+                    <strong style="color: #12304A;">${inspection.netQuantity || 'Not detected in OCR text'}</strong>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Maximum Retail Price (MRP)</span>
+                    <strong style="color: #12304A;">${inspection.mrp || 'Not detected in OCR text'}</strong>
+                  </td>
+                  <td style="padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Batch / Lot No</span>
+                    <span style="color: #12304A;">${inspection.batchNumber || inspection.declarations?.find(d => d.fieldKey === 'batch_number')?.officerVerifiedValue || 'Not detected in OCR text'}</span>
+                  </td>
+                  <td style="padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Mfg / Pack Date</span>
+                    <span style="color: #12304A;">${inspection.declarations?.find(d => d.fieldKey === 'mfg_date')?.officerVerifiedValue || 'Not detected in OCR text'}</span>
+                  </td>
+                  <td style="padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Expiry / Best Before</span>
+                    <span style="color: #12304A;">${inspection.declarations?.find(d => d.fieldKey === 'expiry_date')?.officerVerifiedValue || 'Not detected in OCR text'}</span>
+                  </td>
+                </tr>
+              </table>
+            </div>
+          </div>
+
+          <div>
+            <div style="${sectionHeaderStyle}">Section D: Manufacturer, Packer &amp; Consumer Care Details</div>
+            <div style="${gridBoxStyle}">
+              <table style="width: 100%; border-collapse: collapse; font-size: 10px; table-layout: fixed;">
+                <tr>
+                  <td style="width: 65%; padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Manufacturer / Packer Name &amp; Address (Rule 6(1)(a))</span>
+                    <span style="color: #12304A; font-weight: 600; line-height: 1.3; display: block;">
+                      ${inspection.manufacturerName || inspection.declarations?.find(d => d.fieldKey === 'manufacturer')?.officerVerifiedValue || 'Not detected in OCR text'}
+                    </span>
+                  </td>
+                  <td style="width: 35%; padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Country of Origin (Rule 14 &amp; Rule 6(10))</span>
+                    <span style="color: #12304A; font-weight: 600;">
+                      ${inspection.declarations?.find(d => d.fieldKey === 'country_of_origin')?.officerVerifiedValue || 'India'}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td colspan="2" style="padding: 3px 4px;">
+                    <span style="font-size: 8.5px; color: #52616F; display: block;">Consumer Care Contact Details (Rule 9)</span>
+                    <span style="color: #12304A; line-height: 1.3; display: block;">
+                      ${inspection.declarations?.find(d => d.fieldKey === 'consumer_care')?.officerVerifiedValue || 'Not detected in OCR text'}
+                    </span>
+                  </td>
+                </tr>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div style="border-top: 1px solid #D9E1E8; padding-top: 6px; font-size: 8.5px; color: #52616F; display: flex; justify-content: space-between;">
+          <span>InspectIQ Official Legal Metrology Field Inspection System</span>
+          <span>Record ID: ${inspection.inspectionNumber}</span>
+          <span>Page 1 of 3</span>
+        </div>
+      </div>
+    `;
+
+    // PAGE 2
+    const page2Html = `
+      <div class="pdf-page" style="${commonPageStyle}">
+        <div>
+          <div style="border-bottom: 1.5px solid #12304A; padding-bottom: 6px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: flex-end;">
+            <div>
+              <span style="font-size: 12px; font-weight: 900; color: #12304A;">INSPECTIQ</span>
+              <span style="font-size: 9px; color: #52616F; margin-left: 6px;">Statutory Packaged Commodity Inspection Report</span>
+            </div>
+            <span style="font-size: 8.5px; font-family: monospace; font-weight: 700; color: #0F766E;">
+              ${inspection.inspectionNumber}
+            </span>
+          </div>
+
+          <div style="margin-bottom: 16px;">
+            <div style="${sectionHeaderStyle}">Section E: Statutory Declaration Audit Trail</div>
+            <table style="${tableStyle}">
+              <thead>
+                <tr>
+                  <th style="${thStyle} width: 28%;">Mandatory Declaration</th>
+                  <th style="${thStyle} width: 15%;">Source View</th>
+                  <th style="${thStyle} width: 22%;">OCR Extracted</th>
+                  <th style="${thStyle} width: 20%;">Officer Verified</th>
+                  <th style="${thStyle} width: 15%;">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${declarations.slice(0, 7).map((decl) => {
+                  const sideLabel = decl.sideFound ? decl.sideFound.replace(/_/g, ' ') : 'Package';
+                  const extracted = decl.extractedValue || decl.detectedValue || 'Not detected in OCR text';
+                  const verified = decl.officerVerifiedValue || extracted;
+                  const statusHtml = getBadgeHtml(decl.applicabilityStatus === 'NOT_APPLICABLE' ? 'NOT_APPLICABLE' : decl.status);
+
+                  return `
+                    <tr>
+                      <td style="${tdStyle}">
+                        <strong style="color: #12304A; display: block;">${decl.fieldName}</strong>
+                        <span style="font-size: 8px; font-family: monospace; color: #52616F;">${decl.ruleRef}</span>
+                      </td>
+                      <td style="${tdStyle} text-transform: capitalize; color: #0F766E; font-weight: 600;">
+                        ${sideLabel}
+                      </td>
+                      <td style="${tdStyle} font-family: monospace; font-size: 8.5px; color: #475569;">
+                        ${extracted}
+                      </td>
+                      <td style="${tdStyle} font-weight: 600; color: #12304A;">
+                        ${verified}
+                      </td>
+                      <td style="${tdStyle}">
+                        ${statusHtml}
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+
+          <div>
+            <div style="${sectionHeaderStyle}">Section F: Statutory Compliance Findings</div>
+            <table style="${tableStyle}">
+              <thead>
+                <tr>
+                  <th style="${thStyle} width: 14%;">Rule Ref</th>
+                  <th style="${thStyle} width: 33%;">Requirement / Finding</th>
+                  <th style="${thStyle} width: 20%;">Finding Result</th>
+                  <th style="${thStyle} width: 15%;">Officer Status</th>
+                  <th style="${thStyle} width: 18%;">Provision</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${complianceChecks.slice(0, 6).map((chk) => {
+                  const statusHtml = getBadgeHtml(String(chk.result));
+                  const officerStatus = chk.officerStatus === 'Overridden' ? 'Overridden' : 'Confirmed';
+
+                  return `
+                    <tr>
+                      <td style="${tdStyle} font-family: monospace; font-weight: 700; color: #12304A;">
+                        ${chk.ruleNumber}
+                      </td>
+                      <td style="${tdStyle}">
+                        <strong style="color: #12304A; display: block;">${chk.ruleTitle}</strong>
+                        <span style="font-size: 8.5px; color: #52616F;">${chk.detectedValue || ''}</span>
+                      </td>
+                      <td style="${tdStyle}">
+                        ${statusHtml}
+                      </td>
+                      <td style="${tdStyle} font-size: 8.5px; color: #12304A;">
+                        ${officerStatus}
+                      </td>
+                      <td style="${tdStyle} font-size: 8px; color: #52616F;">
+                        ${chk.statutoryProvision || 'Rule 6, PCR 2011'}
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div style="border-top: 1px solid #D9E1E8; padding-top: 6px; font-size: 8.5px; color: #52616F; display: flex; justify-content: space-between;">
+          <span>InspectIQ Official Legal Metrology Field Inspection System</span>
+          <span>Record ID: ${inspection.inspectionNumber}</span>
+          <span>Page 2 of 3</span>
+        </div>
+      </div>
+    `;
+
+    // PAGE 3
+    const page3Html = `
+      <div class="pdf-page" style="${commonPageStyle}">
+        <div>
+          <div style="border-bottom: 1.5px solid #12304A; padding-bottom: 6px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: flex-end;">
+            <div>
+              <span style="font-size: 12px; font-weight: 900; color: #12304A;">INSPECTIQ</span>
+              <span style="font-size: 9px; color: #52616F; margin-left: 6px;">Statutory Packaged Commodity Inspection Report</span>
+            </div>
+            <span style="font-size: 8.5px; font-family: monospace; font-weight: 700; color: #0F766E;">
+              ${inspection.inspectionNumber}
+            </span>
+          </div>
+
+          <div style="margin-bottom: 14px;">
+            <div style="${sectionHeaderStyle}">
+              Section G: Photographic Evidence Records (${sortedImages.length} View${sortedImages.length === 1 ? '' : 's'})
+            </div>
+            ${sortedImages.length > 0 ? `
+              <div style="display: flex; gap: 10px; width: 100%; box-sizing: border-box;">
+                ${sortedImages.slice(0, 4).map((img) => `
+                  <div style="flex: 1; border: 1px solid #D9E1E8; border-radius: 6px; padding: 6px; background-color: #ffffff; text-align: center; box-sizing: border-box;">
+                    <div style="height: 105px; width: 100%; background-color: #0F172A; border-radius: 4px; overflow: hidden; display: flex; align-items: center; justify-content: center; margin-bottom: 4px;">
+                      <img 
+                        src="${img.url}" 
+                        style="max-height: 105px; max-width: 100%; object-fit: contain; display: block;" 
+                        alt="${img.label}"
+                      />
+                    </div>
+                    <strong style="font-size: 8.5px; color: #12304A; display: block; text-transform: capitalize;">
+                      ${img.label || img.side.replace(/_/g, ' ')} View
+                    </strong>
+                    <span style="font-size: 7.5px; color: #52616F; display: block;">
+                      Captured on-site
+                    </span>
+                  </div>
+                `).join('')}
+              </div>
+            ` : `
+              <div style="${gridBoxStyle} color: #52616F; font-style: italic;">
+                No photographic records attached to this inspection.
+              </div>
+            `}
+          </div>
+
+          <div style="margin-bottom: 14px;">
+            <div style="${sectionHeaderStyle}">Section H: Officer Assessment &amp; Final Decision</div>
+            <div style="${gridBoxStyle}">
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #E2E8F0; padding-bottom: 8px; margin-bottom: 8px;">
+                <div>
+                  <span style="font-size: 8.5px; color: #52616F; display: block;">System Advisory Assessment</span>
+                  <strong style="font-size: 11px; color: #12304A;">
+                    ${formatStatusLabel(inspection.systemAssessment || inspection.status)}
+                  </strong>
+                </div>
+                <div style="text-align: right;">
+                  <span style="font-size: 8.5px; color: #52616F; display: block;">Officer Final Determination</span>
+                  ${getBadgeHtml(decisionLabel)}
+                </div>
+              </div>
+
+              <div>
+                <span style="font-size: 8.5px; color: #52616F; display: block; margin-bottom: 2px;">Official Remarks &amp; Observations</span>
+                <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 4px; padding: 6px 8px; font-size: 9.5px; color: #17212B; line-height: 1.35;">
+                  ${inspection.officerRemarks || inspection.remarks || 'Packaging inspected under Section 18 authority. Mandatory statutory declarations examined and verified.'}
+                </div>
+              </div>
+
+              <div style="font-size: 8px; color: #64748B; margin-top: 6px;">
+                Determination recorded on: ${new Date(inspection.reviewedAt || Date.now()).toLocaleString('en-IN')}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div style="${sectionHeaderStyle}">Section I: Statutory Notice &amp; Formal Signatures</div>
+            <div style="border: 1px solid #D9E1E8; border-radius: 6px; padding: 7px 10px; background-color: #F8FAFC; font-size: 8.5px; color: #52616F; line-height: 1.35; margin-bottom: 14px;">
+              <strong>Statutory Notice:</strong> This formal inspection report constitutes an official field examination record under Section 18 of the Legal Metrology Act, 2009 and the Legal Metrology (Packaged Commodities) Rules, 2011. Where potential non-compliance is established, statutory proceedings may follow under Section 36 or departmental compounding under Section 48 of the Act.
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+              <div style="border-top: 1.5px solid #12304A; padding-top: 6px;">
+                <strong style="color: #12304A; font-size: 10px; display: block;">Inspecting Officer Signature</strong>
+                <span style="font-size: 9.5px; color: #12304A; display: block; margin-top: 2px; font-weight: 600;">${inspection.officerName}</span>
+                <span style="font-size: 8.5px; color: #52616F; display: block;">${inspection.officerDesignation || 'Enforcement Officer'} (${inspection.officerId})</span>
+                <span style="font-size: 8px; font-family: monospace; color: #0F766E; display: block; margin-top: 3px;">
+                  Ref: ${inspection.officerDecision?.digitalSignatureRef || `LM-DSC-${inspection.officerId}-VERIFIED`}
+                </span>
+              </div>
+
+              <div style="border-top: 1.5px solid #12304A; padding-top: 6px; text-align: right;">
+                <strong style="color: #12304A; font-size: 10px; display: block;">Trader / Premises Representative</strong>
+                <span style="font-size: 9.5px; color: #12304A; display: block; margin-top: 2px; font-weight: 600;">${inspection.premisesName || 'Establishment In-charge'}</span>
+                <span style="font-size: 8.5px; color: #52616F; display: block;">Acknowledgement of Inspection Record</span>
+                <span style="font-size: 8px; color: #52616F; display: block; margin-top: 3px;">
+                  Date: ${new Date().toLocaleDateString('en-IN')}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="border-top: 1px solid #D9E1E8; padding-top: 6px; font-size: 8.5px; color: #52616F; display: flex; justify-content: space-between;">
+          <span>InspectIQ Official Legal Metrology Field Inspection System</span>
+          <span>Record ID: ${inspection.inspectionNumber}</span>
+          <span>Page 3 of 3</span>
+        </div>
+      </div>
+    `;
+
+    container.innerHTML = page1Html + page2Html + page3Html;
+    document.body.appendChild(container);
+
+    try {
+      const pageElements = container.querySelectorAll('.pdf-page');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = 210;
+      const pdfHeight = 297;
+
+      for (let i = 0; i < pageElements.length; i++) {
+        const pageEl = pageElements[i] as HTMLElement;
+        const canvas = await html2canvas(pageEl, {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#ffffff',
+          windowWidth: 794,
+        });
+
+        const imgData = canvas.toDataURL('image/jpeg', 0.96);
+
+        if (i > 0) {
+          pdf.addPage();
+        }
+
+        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+      }
+
+      const blob = pdf.output('blob');
+      if (!blob || blob.size === 0) {
+        throw new Error('PDF generation produced an empty file (0 bytes).');
+      }
+
+      const url = URL.createObjectURL(blob);
+      return { blob, url };
     } finally {
       if (document.body.contains(container)) {
         document.body.removeChild(container);
