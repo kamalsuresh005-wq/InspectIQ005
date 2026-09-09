@@ -129,6 +129,13 @@ export type OcrProcessingState =
   | 'requires_retake'
   | 'not_configured';
 
+export interface ImageOcrResult {
+  source: PackageSide | string;
+  sourceLabel: string;
+  imageId: string;
+  text: string;
+}
+
 export interface ProductDetails {
   productName: string;
   brand: string;
@@ -339,6 +346,8 @@ export interface Inspection {
 
   // OCR Extraction State (Stage 2)
   rawOcrText?: string;
+  combinedRawOcrText?: string;
+  ocrResults?: ImageOcrResult[];
   ocrStatus?: OcrProcessingState;
 
   // Officer Details

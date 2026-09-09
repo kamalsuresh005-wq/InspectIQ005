@@ -16,7 +16,8 @@ import {
   ProductDetails,
   OcrProcessingState,
   ApplicabilityStatus,
-  ComplianceControlledStatus
+  ComplianceControlledStatus,
+  ImageOcrResult
 } from '../types';
 import { StorageService } from '../services/storageService';
 import { AiOcrService } from '../services/aiOcrService';
@@ -180,7 +181,7 @@ interface InspectionContextType {
   submitOfficerDecision: (decision: OfficerDecision) => void;
   viewExistingInspection: (inspectionId: string, targetStep?: InspectionFlowStep) => void;
   updateProductDetails: (details: ProductDetails) => void;
-  updateRawOcrText: (text: string, status?: OcrProcessingState) => void;
+  updateRawOcrText: (text: string, status?: OcrProcessingState, ocrResults?: ImageOcrResult[], combinedText?: string) => void;
   updateDeclarationsList: (declarations: ExtractedDeclaration[]) => void;
   completeCurrentInspection: () => void;
   deleteEvidenceImage: (imageId: string) => void;
@@ -375,10 +376,17 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }));
   };
 
-  const updateRawOcrText = (text: string, status?: OcrProcessingState) => {
+  const updateRawOcrText = (
+    text: string, 
+    status?: OcrProcessingState,
+    ocrResults?: ImageOcrResult[],
+    combinedText?: string
+  ) => {
     setCurrentInspection((prev) => ({
       ...prev,
       rawOcrText: text,
+      combinedRawOcrText: combinedText || text,
+      ocrResults: ocrResults || prev.ocrResults,
       ocrStatus: status || prev.ocrStatus || 'success',
       updatedAt: new Date().toISOString(),
     }));

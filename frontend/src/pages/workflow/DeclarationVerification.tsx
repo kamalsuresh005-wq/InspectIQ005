@@ -43,11 +43,17 @@ export const DeclarationVerification: React.FC = () => {
   // Auto-structure declarations if not yet populated
   useEffect(() => {
     if (currentInspection.declarations.length === 0) {
-      const initialDeclarations = activeOcrService.structureDeclarationsFromText(
-        currentInspection.rawOcrText || '',
-        'declaration_area',
-        currentInspection.productDetails
-      );
+      const initialDeclarations = (currentInspection.ocrResults && currentInspection.ocrResults.length > 0)
+        ? activeOcrService.structureDeclarationsFromMultiOcr(
+            currentInspection.ocrResults,
+            currentInspection.combinedRawOcrText || currentInspection.rawOcrText || '',
+            currentInspection.productDetails
+          )
+        : activeOcrService.structureDeclarationsFromText(
+            currentInspection.rawOcrText || '',
+            'declaration_area',
+            currentInspection.productDetails
+          );
       updateInspectionMetadata({ declarations: initialDeclarations });
     }
   }, []);
@@ -191,9 +197,16 @@ export const DeclarationVerification: React.FC = () => {
                     <span className="text-xs font-bold text-[#17212B] block">
                       {decl.fieldName}
                     </span>
-                    <span className="text-[10px] font-mono text-[#52616F]">
-                      {decl.ruleRef}
-                    </span>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-[10px] font-mono text-[#52616F]">
+                        {decl.ruleRef}
+                      </span>
+                      {decl.sideFound && (
+                        <span className="text-[9px] font-semibold text-[#0F766E] bg-[#E6F4F1] px-1.5 py-0.2 rounded capitalize">
+                          Source: {decl.sideFound.replace(/_/g, ' ')}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">

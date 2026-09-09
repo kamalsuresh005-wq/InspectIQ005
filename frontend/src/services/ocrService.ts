@@ -1,5 +1,5 @@
 import { createWorker, Worker } from 'tesseract.js';
-import { ExtractedDeclaration, OcrProcessingState, PackageSide, ProductDetails } from '../types';
+import { ExtractedDeclaration, OcrProcessingState, PackageSide, ProductDetails, ImageOcrResult } from '../types';
 
 export interface OcrProgressUpdate {
   status: string;
@@ -14,15 +14,34 @@ export interface OcrExtractionResult {
   structuredDeclarations: ExtractedDeclaration[];
 }
 
+export interface MultiImageOcrResult {
+  status: OcrProcessingState;
+  ocrResults: ImageOcrResult[];
+  combinedRawOcrText: string;
+  message: string;
+  processingTimeMs: number;
+  structuredDeclarations: ExtractedDeclaration[];
+}
+
 export interface IOcrService {
   isConfigured(): boolean;
   extractText(
     imageUrlOrBase64: string,
     onProgress?: (update: OcrProgressUpdate) => void
   ): Promise<OcrExtractionResult>;
+  extractTextFromMultipleImages(
+    images: { id: string; side: PackageSide; label?: string; url: string }[],
+    onProgress?: (update: OcrProgressUpdate) => void,
+    productDetails?: ProductDetails
+  ): Promise<MultiImageOcrResult>;
   structureDeclarationsFromText(
     rawText: string, 
     side?: PackageSide, 
+    productDetails?: ProductDetails
+  ): ExtractedDeclaration[];
+  structureDeclarationsFromMultiOcr(
+    ocrResults: ImageOcrResult[],
+    combinedText: string,
     productDetails?: ProductDetails
   ): ExtractedDeclaration[];
 }
@@ -340,6 +359,149 @@ export class TesseractOcrService implements IOcrService {
   }
 
   /**
+   * Processes ALL captured package images (Front, Back, Side, Declaration Area) sequentially
+   * with the client-side Tesseract.js engine and produces a combined, normalized OCR result
+   * with view provenance preserved.
+   */
+  public async extractTextFromMultipleImages(
+    images: { id: string; side: PackageSide; label?: string; url: string }[],
+    onProgress?: (update: OcrProgressUpdate) => void,
+    productDetails?: ProductDetails
+  ): Promise<MultiImageOcrResult> {
+    const validImages = (images || []).filter(img => img && img.url && img.url.trim() !== '');
+    if (validImages.length === 0) {
+      return {
+        status: 'requires_retake',
+        ocrResults: [],
+        combinedRawOcrText: '',
+        message: 'No package images provided for OCR extraction.',
+        processingTimeMs: 0,
+        structuredDeclarations: [],
+      };
+    }
+
+    const startTime = Date.now();
+    const totalImages = validImages.length;
+    const ocrResults: ImageOcrResult[] = [];
+
+    try {
+      if (onProgress) {
+        onProgress({ status: 'Initializing OCR engine...', progress: 10 });
+      }
+
+      // Initialize worker once for all images
+      const worker = await this.getWorker(onProgress);
+
+      for (let i = 0; i < totalImages; i++) {
+        const img = validImages[i];
+        const sideLabel = img.label || (img.side ? img.side.replace(/_/g, ' ') : `Image ${i + 1}`);
+        const baseProgress = Math.round(15 + (i / totalImages) * 75);
+
+        if (onProgress) {
+          onProgress({ 
+            status: `Preprocessing ${sideLabel} image (${i + 1}/${totalImages})...`, 
+            progress: baseProgress 
+          });
+        }
+
+        let preprocessed: string;
+        try {
+          preprocessed = await preprocessImageForOcr(img.url);
+        } catch {
+          preprocessed = img.url;
+        }
+
+        if (onProgress) {
+          onProgress({ 
+            status: `Extracting text from ${sideLabel} (${i + 1}/${totalImages})...`, 
+            progress: baseProgress + Math.round(75 / totalImages * 0.7) 
+          });
+        }
+
+        let recogTimeout: any;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          recogTimeout = setTimeout(() => {
+            reject(new Error(`OCR recognition timed out on ${sideLabel}.`));
+          }, 30000);
+        });
+
+        let rawText = '';
+        try {
+          const result: any = await Promise.race([
+            worker.recognize(preprocessed),
+            timeoutPromise,
+          ]);
+          clearTimeout(recogTimeout);
+          rawText = (result?.data?.text || '').trim();
+        } catch (imgErr) {
+          clearTimeout(recogTimeout);
+          console.warn(`[OCR] Error recognizing ${sideLabel}:`, imgErr);
+          rawText = '';
+        }
+
+        ocrResults.push({
+          source: img.side,
+          sourceLabel: sideLabel,
+          imageId: img.id,
+          text: rawText,
+        });
+      }
+
+      // Combine text with clear package view headers
+      const combinedSections = ocrResults
+        .filter(r => r.text && r.text.length > 0)
+        .map(r => `--- ${r.sourceLabel.toUpperCase()} ---\n${r.text}`);
+      const combinedText = combinedSections.join('\n\n');
+
+      if (onProgress) {
+        onProgress({ status: 'Analyzing statutory declarations across all package views...', progress: 95 });
+      }
+
+      const structuredDeclarations = this.structureDeclarationsFromMultiOcr(
+        ocrResults, 
+        combinedText, 
+        productDetails
+      );
+
+      const processingTimeMs = Date.now() - startTime;
+
+      if (!combinedText || combinedText.trim().length === 0) {
+        return {
+          status: 'failed',
+          ocrResults,
+          combinedRawOcrText: '',
+          message: 'OCR could not extract readable text from captured package images. Please ensure labels are in focus with good lighting.',
+          processingTimeMs,
+          structuredDeclarations,
+        };
+      }
+
+      if (onProgress) {
+        onProgress({ status: `✓ OCR extraction completed across ${totalImages} package image(s)`, progress: 100 });
+      }
+
+      return {
+        status: 'success',
+        ocrResults,
+        combinedRawOcrText: combinedText,
+        message: `✓ OCR completed: processed ${totalImages} package image(s).`,
+        processingTimeMs,
+        structuredDeclarations,
+      };
+    } catch (err: any) {
+      console.error('[OCR MULTI ERROR]', err);
+      return {
+        status: 'failed',
+        ocrResults,
+        combinedRawOcrText: '',
+        message: err?.message || 'OCR extraction failed across package images. Please try again.',
+        processingTimeMs: Date.now() - startTime,
+        structuredDeclarations: [],
+      };
+    }
+  }
+
+  /**
    * Deterministically parses raw OCR text into standard Legal Metrology (PCR 2011) declaration fields.
    * NOTE: No compliance checking or violation marking is performed in Stage 2.
    */
@@ -572,6 +734,287 @@ export class TesseractOcrService implements IOcrService {
       confidence: dimValue ? 80 : 0,
       isMandatory: false,
       sideFound: side,
+      ruleRef: 'Rule 6(1)(f)',
+    });
+
+    return declarations;
+  }
+
+  /**
+   * Deterministically structures Legal Metrology declarations across all captured package images,
+   * preserving the exact source view (Front, Back, Side, Declaration Area) for full auditability.
+   */
+  public structureDeclarationsFromMultiOcr(
+    ocrResults: ImageOcrResult[],
+    combinedText: string,
+    productDetails?: ProductDetails
+  ): ExtractedDeclaration[] {
+    const declarations: ExtractedDeclaration[] = [];
+
+    // Helper: Finds first match in individual view results, then falls back to combined text
+    const findInResults = (regex: RegExp): { 
+      match: RegExpMatchArray | null; 
+      side: PackageSide; 
+      imageId?: string; 
+      snippet: string; 
+    } => {
+      // 1. Check each individual package view
+      for (const res of ocrResults) {
+        if (!res.text) continue;
+        const m = res.text.match(regex);
+        if (m) {
+          return {
+            match: m,
+            side: (res.source as PackageSide) || 'declaration_area',
+            imageId: res.imageId,
+            snippet: m[0],
+          };
+        }
+      }
+      // 2. Check full combined text as fallback
+      const cm = combinedText.match(regex);
+      if (cm) {
+        return {
+          match: cm,
+          side: (ocrResults[0]?.source as PackageSide) || 'declaration_area',
+          imageId: ocrResults[0]?.imageId,
+          snippet: cm[0],
+        };
+      }
+      return { match: null, side: 'declaration_area', snippet: '' };
+    };
+
+    // 1. Maximum Retail Price (Rule 6(1)(e))
+    const mrpFind = findInResults(/(?:MRP|M\.R\.P|MAX\.?\s*RETAIL\s*PRICE|MRRP|₹|Rs\.?)\s*[:=.-]?\s*([₹\d.,]+(?:\s*(?:incl\.?|inclusive).*?\))?)/i);
+    const mrpValue = mrpFind.match ? mrpFind.match[0].trim() : (productDetails?.mrp || '');
+    declarations.push({
+      id: 'decl_mrp',
+      fieldKey: 'mrp',
+      fieldName: 'Maximum Retail Price (MRP)',
+      detectedValue: mrpValue || 'Not detected in OCR text',
+      rawOcrText: mrpFind.snippet || (mrpFind.match ? mrpFind.match[0] : ''),
+      extractedValue: mrpValue,
+      officerVerifiedValue: mrpValue || 'Not detected in OCR text',
+      applicabilityStatus: 'APPLICABLE',
+      readabilityAssessment: mrpValue ? 'Acceptable' : 'Needs Review',
+      status: mrpValue ? 'detected' : 'not_detected',
+      confidence: mrpValue ? 92 : 0,
+      isMandatory: true,
+      sideFound: mrpFind.side,
+      evidenceImageId: mrpFind.imageId,
+      ruleRef: 'Rule 6(1)(e)',
+    });
+
+    // 2. Net Quantity (Rule 6(1)(c))
+    const netQtyFind = findInResults(/(?:NET\s*(?:WT|WEIGHT|QTY|QUANTITY)?|NETWEIGHT|NETQTY)\s*[:=.-]?\s*(\d+(?:\.\d+)?\s*(?:g|kg|ml|l|ltr|gm|pieces|units|N|9))\b/i);
+    let netQtyValue = netQtyFind.match ? netQtyFind.match[1].trim() : (productDetails?.netQuantity || '');
+    if (netQtyValue && /\d+9$/.test(netQtyValue)) {
+      netQtyValue = netQtyValue.slice(0, -1) + ' g';
+    }
+    declarations.push({
+      id: 'decl_net_quantity',
+      fieldKey: 'net_quantity',
+      fieldName: 'Net Quantity',
+      detectedValue: netQtyValue || 'Not detected in OCR text',
+      rawOcrText: netQtyFind.snippet || (netQtyFind.match ? netQtyFind.match[0] : ''),
+      extractedValue: netQtyValue,
+      officerVerifiedValue: netQtyValue || 'Not detected in OCR text',
+      applicabilityStatus: 'APPLICABLE',
+      readabilityAssessment: netQtyValue ? 'Acceptable' : 'Needs Review',
+      status: netQtyValue ? 'detected' : 'not_detected',
+      confidence: netQtyValue ? 94 : 0,
+      isMandatory: true,
+      sideFound: netQtyFind.side,
+      evidenceImageId: netQtyFind.imageId,
+      ruleRef: 'Rule 6(1)(c)',
+    });
+
+    // 3. Unit Sale Price (Rule 6(11))
+    const uspFind = findInResults(/(?:USP|UNIT\s*SALE\s*PRICE)\s*[:=.-]?\s*([₹RRs\d.,]+\s*(?:\/|per)\s*(?:g|kg|ml|l|piece|unit|N))/i);
+    const uspValue = uspFind.match ? uspFind.match[1].trim() : (productDetails?.unitSalePrice || '');
+    declarations.push({
+      id: 'decl_unit_sale_price',
+      fieldKey: 'unit_sale_price',
+      fieldName: 'Unit Sale Price (USP)',
+      detectedValue: uspValue || 'Not detected in OCR text',
+      rawOcrText: uspFind.snippet || '',
+      extractedValue: uspValue,
+      officerVerifiedValue: uspValue || 'Not detected in OCR text',
+      applicabilityStatus: 'APPLICABLE',
+      readabilityAssessment: uspValue ? 'Acceptable' : 'Needs Review',
+      status: uspValue ? 'detected' : 'not_detected',
+      confidence: uspValue ? 85 : 0,
+      isMandatory: false,
+      sideFound: uspFind.side,
+      evidenceImageId: uspFind.imageId,
+      ruleRef: 'Rule 6(11)',
+    });
+
+    // 4. Common / Generic Commodity Name (Rule 6(1)(b))
+    const genericFind = findInResults(/(?:GENERIC\s*NAME|COMMODITY|PRODUCT\s*NAME|ITEM\s*NAME)\s*[:=.-]?\s*([^\n,]+)/i);
+    const genericValue = genericFind.match ? genericFind.match[1].trim() : (productDetails?.productName || '');
+    declarations.push({
+      id: 'decl_product_name',
+      fieldKey: 'product_name',
+      fieldName: 'Generic Commodity Name',
+      detectedValue: genericValue || 'Not detected in OCR text',
+      rawOcrText: genericFind.snippet || (genericFind.match ? genericFind.match[0] : ''),
+      extractedValue: genericValue,
+      officerVerifiedValue: genericValue || 'Not detected in OCR text',
+      applicabilityStatus: 'APPLICABLE',
+      readabilityAssessment: genericValue ? 'Acceptable' : 'Needs Review',
+      status: genericValue ? 'detected' : 'not_detected',
+      confidence: genericValue ? 90 : 0,
+      isMandatory: true,
+      sideFound: genericFind.side,
+      evidenceImageId: genericFind.imageId,
+      ruleRef: 'Rule 6(1)(b)',
+    });
+
+    // 5. Manufacturer / Packer Details & Address (Rule 6(1)(a))
+    const mfgFind = findInResults(/(?:MANUFACTURED\s*(?:AND\s*PACKED)?\s*BY|MFD\s*BY|MED\s*BY|PACKED\s*BY|IMPORTED\s*BY|MARKETED\s*BY|MFG\s*BY)\s*[:=.-]?\s*([^\n]+)/i);
+    const mfgValue = mfgFind.match ? mfgFind.match[1].trim() : (productDetails?.manufacturerDetails || '');
+    declarations.push({
+      id: 'decl_manufacturer',
+      fieldKey: 'manufacturer',
+      fieldName: 'Manufacturer / Packer Details',
+      detectedValue: mfgValue || 'Not detected in OCR text',
+      rawOcrText: mfgFind.snippet || (mfgFind.match ? mfgFind.match[0] : ''),
+      extractedValue: mfgValue,
+      officerVerifiedValue: mfgValue || 'Not detected in OCR text',
+      applicabilityStatus: 'APPLICABLE',
+      readabilityAssessment: mfgValue ? 'Acceptable' : 'Needs Review',
+      status: mfgValue ? 'detected' : 'not_detected',
+      confidence: mfgValue ? 88 : 0,
+      isMandatory: true,
+      sideFound: mfgFind.side,
+      evidenceImageId: mfgFind.imageId,
+      ruleRef: 'Rule 6(1)(a)',
+    });
+
+    // 6. Month & Year of Manufacture / Packing (Rule 6(1)(d))
+    const mfgDateFind = findInResults(/(?:MFD|MFG|WFD|PACKED|PKD|DATE\s*OF\s*PACKING)\s*[:=.-]?\s*([A-Za-z0-9\/\.\-]+)/i);
+    const mfgDateValue = mfgDateFind.match ? mfgDateFind.match[1].trim() : (productDetails?.manufacturingDate || '');
+    declarations.push({
+      id: 'decl_mfg_date',
+      fieldKey: 'mfg_date',
+      fieldName: 'Month & Year of Manufacture / Packing',
+      detectedValue: mfgDateValue || 'Not detected in OCR text',
+      rawOcrText: mfgDateFind.snippet || '',
+      extractedValue: mfgDateValue,
+      officerVerifiedValue: mfgDateValue || 'Not detected in OCR text',
+      applicabilityStatus: 'APPLICABLE',
+      readabilityAssessment: mfgDateValue ? 'Acceptable' : 'Needs Review',
+      status: mfgDateValue ? 'detected' : 'not_detected',
+      confidence: mfgDateValue ? 86 : 0,
+      isMandatory: true,
+      sideFound: mfgDateFind.side,
+      evidenceImageId: mfgDateFind.imageId,
+      ruleRef: 'Rule 6(1)(d)',
+    });
+
+    // 7. Best Before / Expiry Date (Rule 6(1)(d) proviso)
+    const expFind = findInResults(/(?:EXPIRY|EXP|USE\s*BY|BEST\s*BEFORE)\s*[:=.-]?\s*([A-Za-z0-9\/\.\-\s]+?(?=\n|$))/i);
+    const expValue = expFind.match ? expFind.match[1].trim() : (productDetails?.expiryDate || '');
+    declarations.push({
+      id: 'decl_expiry_date',
+      fieldKey: 'expiry_date',
+      fieldName: 'Best Before / Expiry Date',
+      detectedValue: expValue || 'Not detected in OCR text',
+      rawOcrText: expFind.snippet || '',
+      extractedValue: expValue,
+      officerVerifiedValue: expValue || 'Not detected in OCR text',
+      applicabilityStatus: 'REQUIRES_OFFICER_REVIEW',
+      readabilityAssessment: expValue ? 'Acceptable' : 'Needs Review',
+      status: expValue ? 'detected' : 'not_detected',
+      confidence: expValue ? 82 : 0,
+      isMandatory: false,
+      sideFound: expFind.side,
+      evidenceImageId: expFind.imageId,
+      ruleRef: 'Rule 6(1)(d)',
+    });
+
+    // 8. Batch / Lot Number (Rule 6(1)(g))
+    const batchFind = findInResults(/(?:BATCH\s*(?:NO|NUMBER)?|LOT\s*(?:NO|NUMBER)?|B\.NO|B\.N\.)\s*[:=.-]?\s*([A-Za-z0-9\-]+)/i);
+    const batchValue = batchFind.match ? batchFind.match[1].trim() : (productDetails?.batchNumber || '');
+    declarations.push({
+      id: 'decl_batch_number',
+      fieldKey: 'batch_number',
+      fieldName: 'Batch / Lot Number',
+      detectedValue: batchValue || 'Not detected in OCR text',
+      rawOcrText: batchFind.snippet || '',
+      extractedValue: batchValue,
+      officerVerifiedValue: batchValue || 'Not detected in OCR text',
+      applicabilityStatus: 'APPLICABLE',
+      readabilityAssessment: batchValue ? 'Acceptable' : 'Needs Review',
+      status: batchValue ? 'detected' : 'not_detected',
+      confidence: batchValue ? 91 : 0,
+      isMandatory: false,
+      sideFound: batchFind.side,
+      evidenceImageId: batchFind.imageId,
+      ruleRef: 'Rule 6(1)(g)',
+    });
+
+    // 9. Consumer Care Details (Rule 9)
+    const careFind = findInResults(/(?:CONSUMER\s*CARE|CUSTOMER\s*CARE|CUSTOMERCARE|FEEDBACK|HELPLINE|TOLL\s*FREE|EMAIL)\s*[:=.-]?\s*([^\n]+)/i);
+    const careValue = careFind.match ? careFind.match[1].trim() : (productDetails?.consumerCare || '');
+    declarations.push({
+      id: 'decl_consumer_care',
+      fieldKey: 'consumer_care',
+      fieldName: 'Consumer Care Details',
+      detectedValue: careValue || 'Not detected in OCR text',
+      rawOcrText: careFind.snippet || '',
+      extractedValue: careValue,
+      officerVerifiedValue: careValue || 'Not detected in OCR text',
+      applicabilityStatus: 'APPLICABLE',
+      readabilityAssessment: careValue ? 'Acceptable' : 'Needs Review',
+      status: careValue ? 'detected' : 'not_detected',
+      confidence: careValue ? 84 : 0,
+      isMandatory: true,
+      sideFound: careFind.side,
+      evidenceImageId: careFind.imageId,
+      ruleRef: 'Rule 9',
+    });
+
+    // 10. Country of Origin (Rule 14 & Rule 6(10))
+    const originFind = findInResults(/(?:MADE\s*IN|COUNTRY\s*OF\s*ORIGIN|COUNTRYOF\s*ORIGIN|PRODUCE\s*OF)\s*[:=.-]?\s*([A-Za-z\s]+)/i);
+    const originValue = originFind.match ? originFind.match[1].trim() : (productDetails?.countryOfOrigin || '');
+    declarations.push({
+      id: 'decl_country_of_origin',
+      fieldKey: 'country_of_origin',
+      fieldName: 'Country of Origin',
+      detectedValue: originValue || 'Not detected in OCR text',
+      rawOcrText: originFind.snippet || '',
+      extractedValue: originValue,
+      officerVerifiedValue: originValue || 'Not detected in OCR text',
+      applicabilityStatus: 'REQUIRES_OFFICER_REVIEW',
+      readabilityAssessment: originValue ? 'Acceptable' : 'Needs Review',
+      status: originValue ? 'detected' : 'not_detected',
+      confidence: originValue ? 87 : 0,
+      isMandatory: false,
+      sideFound: originFind.side,
+      evidenceImageId: originFind.imageId,
+      ruleRef: 'Rule 14',
+    });
+
+    // 11. Dimensions (Rule 6(1)(f) where applicable)
+    const dimFind = findInResults(/(?:DIMENSIONS?|SIZE)\s*[:=]?\s*(\d+(?:\.\d+)?\s*(?:cm|mm|m)\s*[xX*]\s*\d+(?:\.\d+)?\s*(?:cm|mm|m)(?:\s*[xX*]\s*\d+(?:\.\d+)?\s*(?:cm|mm|m))?)/i);
+    const dimValue = dimFind.match ? dimFind.match[1].trim() : '';
+    declarations.push({
+      id: 'decl_dimensions',
+      fieldKey: 'dimensions',
+      fieldName: 'Dimensions (where applicable)',
+      detectedValue: dimValue || 'Not detected in OCR text',
+      rawOcrText: dimFind.snippet || '',
+      extractedValue: dimValue,
+      officerVerifiedValue: dimValue || 'Not detected in OCR text',
+      applicabilityStatus: 'NOT_APPLICABLE',
+      readabilityAssessment: 'Needs Review',
+      status: dimValue ? 'detected' : 'not_detected',
+      confidence: dimValue ? 80 : 0,
+      isMandatory: false,
+      sideFound: dimFind.side,
+      evidenceImageId: dimFind.imageId,
       ruleRef: 'Rule 6(1)(f)',
     });
 

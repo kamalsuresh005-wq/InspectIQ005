@@ -52,15 +52,26 @@ export const ReportsNotices: React.FC = () => {
   const handleDownloadPdf = async (insp: Inspection) => {
     setPreviewInspection(insp);
     setIsExporting(true);
-    setTimeout(async () => {
-      try {
-        await ReportService.downloadPdfFromElement('report-notice-preview-doc', `${insp.inspectionNumber}_Official_Record`);
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setIsExporting(false);
+    try {
+      if (previewMode === 'report') {
+        await ReportService.downloadInspectionPdf(insp, `${insp.inspectionNumber}_Inspection_Report`);
+      } else {
+        setTimeout(async () => {
+          try {
+            await ReportService.downloadPdfFromElement('report-notice-preview-doc', `${insp.inspectionNumber}_Official_Record`);
+          } catch (e) {
+            console.error(e);
+          } finally {
+            setIsExporting(false);
+          }
+        }, 150);
+        return;
       }
-    }, 300);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleDownloadDocx = (insp: Inspection) => {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   FileText, 
   ArrowRight, 
@@ -8,92 +8,120 @@ import {
   CheckCircle2, 
   Play, 
   RefreshCw,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Layers,
+  Sparkles
 } from 'lucide-react';
 import { useInspection } from '../../context/InspectionContext';
 import { activeOcrService, OcrProgressUpdate } from '../../services/ocrService';
-import { OcrProcessingState } from '../../types';
+import { OcrProcessingState, ImageOcrResult, ExtractedDeclaration } from '../../types';
 
 export const OcrAnalysisScreen: React.FC = () => {
   const { currentInspection, updateRawOcrText, updateDeclarationsList, setFlowStep } = useInspection();
 
-  const images = currentInspection.images;
-  const [selectedImageId, setSelectedImageId] = useState<string>(
-    images.find(img => img.side === 'declaration_area')?.id || images[0]?.id || ''
-  );
+  const images = currentInspection.images || [];
+  const validImages = images.filter(img => img && img.url && img.url.trim() !== '');
 
-  const activeImage = images.find(img => img.id === selectedImageId) || images[0];
+  // Active view tab: 'all' or specific image id
+  const [selectedTab, setSelectedTab] = useState<string>('all');
+
+  const [ocrResults, setOcrResults] = useState<ImageOcrResult[]>(() => {
+    return currentInspection.ocrResults || [];
+  });
 
   const [status, setStatus] = useState<OcrProcessingState>(
     currentInspection.ocrStatus === 'success' ? 'success' : 'ready'
   );
   const [progressPct, setProgressPct] = useState<number>(0);
   const [statusMessage, setStatusMessage] = useState<string>(() => {
-    if (currentInspection.ocrStatus === 'success') return 'OCR completed successfully.';
-    return 'Ready to extract printed declarations from the package image.';
+    if (currentInspection.ocrStatus === 'success') {
+      return `✓ OCR completed across ${validImages.length} captured package view(s).`;
+    }
+    return `Ready to run OCR on all ${validImages.length} captured package view(s).`;
   });
-  const [rawText, setRawText] = useState<string>(currentInspection.rawOcrText || '');
+  const [combinedText, setCombinedText] = useState<string>(
+    currentInspection.combinedRawOcrText || currentInspection.rawOcrText || ''
+  );
+  const [extractedDeclarations, setExtractedDeclarations] = useState<ExtractedDeclaration[]>(
+    currentInspection.declarations || []
+  );
 
-  const handleRunOcr = async () => {
-    if (!activeImage) {
+  const handleRunAllOcr = async () => {
+    if (validImages.length === 0) {
       setStatus('requires_retake');
-      setStatusMessage('Please capture a package image first.');
+      setStatusMessage('Please capture at least one package image first.');
       return;
     }
 
-    console.log('[OCR UI] Run OCR clicked. Image ID:', activeImage.id, 'Side:', activeImage.side);
     setStatus('processing');
     setProgressPct(5);
-    setStatusMessage('Initializing OCR...');
+    setStatusMessage(`Initializing OCR for ${validImages.length} package view(s)...`);
 
     try {
-      const result = await activeOcrService.extractText(
-        activeImage.url,
+      const result = await activeOcrService.extractTextFromMultipleImages(
+        validImages,
         (update: OcrProgressUpdate) => {
           setStatusMessage(update.status);
           setProgressPct(update.progress);
-        }
+        },
+        currentInspection.productDetails
       );
 
-      console.log('[OCR UI] extractText completed with status:', result.status, 'Message:', result.message);
       setStatus(result.status);
       setStatusMessage(result.message);
 
       if (result.status === 'success') {
         setProgressPct(100);
-        setRawText(result.rawText);
-        updateRawOcrText(result.rawText, 'success');
+        setOcrResults(result.ocrResults);
+        setCombinedText(result.combinedRawOcrText);
+        setExtractedDeclarations(result.structuredDeclarations);
+
+        // Update context with combined text and per-image provenance
+        updateRawOcrText(
+          result.combinedRawOcrText, 
+          'success', 
+          result.ocrResults, 
+          result.combinedRawOcrText
+        );
+        updateDeclarationsList(result.structuredDeclarations);
       } else {
         updateRawOcrText('', 'failed');
       }
     } catch (err: any) {
-      console.error('[OCR UI ERROR]', err);
+      console.error('[OCR MULTI UI ERROR]', err);
       setStatus('failed');
       setStatusMessage(
-        err?.message || 'OCR could not be completed. Please ensure label is clear and try again.'
+        err?.message || 'OCR could not be completed across all images. Please check lighting and focus.'
       );
       updateRawOcrText('', 'failed');
     }
   };
 
+  // Auto-run OCR on first screen mount if not yet processed
+  useEffect(() => {
+    if (status === 'ready' && validImages.length > 0 && !currentInspection.rawOcrText) {
+      handleRunAllOcr();
+    }
+  }, []);
+
   const handleContinue = () => {
-    if (status !== 'success' || !rawText.trim()) {
+    if (status !== 'success' || !combinedText.trim()) {
       return;
     }
 
-    // Structure declarations deterministically using real OCR text
-    const declarations = activeOcrService.structureDeclarationsFromText(
-      rawText,
-      activeImage?.side,
-      currentInspection.productDetails
-    );
-
-    updateDeclarationsList(declarations);
-    updateRawOcrText(rawText, 'success');
+    if (extractedDeclarations.length > 0) {
+      updateDeclarationsList(extractedDeclarations);
+    }
+    updateRawOcrText(combinedText, 'success', ocrResults, combinedText);
     setFlowStep('declaration_verification');
   };
 
-  const isOcrComplete = status === 'success' && rawText.trim().length > 0;
+  const isOcrComplete = status === 'success' && combinedText.trim().length > 0;
+
+  // Find text for active tab
+  const displayedText = selectedTab === 'all'
+    ? combinedText
+    : (ocrResults.find(r => r.imageId === selectedTab)?.text || '');
 
   return (
     <div className="flex flex-col justify-between min-h-[calc(100dvh-115px)] max-w-md mx-auto p-4 select-none">
@@ -105,73 +133,31 @@ export const OcrAnalysisScreen: React.FC = () => {
         <div className="border-b border-[#D9E1E8] pb-3">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-[#0F766E] uppercase tracking-wider">
-              STEP 5 · OPTICAL EXTRACTION
+              STEP 5 · MULTI-VIEW OCR
             </span>
             <span className="text-[10.5px] font-mono text-[#52616F]">
-              Tesseract.js Engine
+              All Views Engine
             </span>
           </div>
           <h1 className="text-xl font-bold text-[#12304A] mt-1">OCR Text Extraction</h1>
-          <p className="text-xs text-[#52616F] mt-0.5">
-            Extract printed declarations from the captured package image.
+          <p className="text-xs text-[#52616F] mt-0.5 leading-relaxed">
+            Extract and combine printed statutory declarations across all captured package views (Front, Back, Side, Declaration Area).
           </p>
         </div>
 
-        {/* Multi-image Selector if available */}
-        {images.length > 1 && (
-          <div>
-            <label className="block font-semibold text-[#17212B] uppercase tracking-wider text-[11px] mb-1.5">
-              Select Package Image
-            </label>
-            <div className="flex gap-1.5 overflow-x-auto pb-1">
-              {images.map((img) => (
-                <button
-                  key={img.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedImageId(img.id);
-                    if (status !== 'processing') {
-                      setStatus('ready');
-                      setStatusMessage('Image selected. Tap "Run OCR" to extract text.');
-                    }
-                  }}
-                  className={`px-2.5 py-1 rounded-lg text-[10.5px] font-semibold shrink-0 border cursor-pointer ${
-                    (activeImage && activeImage.id === img.id)
-                      ? 'bg-[#12304A] text-white border-[#12304A]'
-                      : 'bg-white text-[#52616F] border-[#D9E1E8]'
-                  }`}
-                >
-                  {img.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Selected Package Image Card */}
-        {activeImage ? (
-          <div className="bg-white border border-[#D9E1E8] rounded-xl p-3 shadow-card flex items-center gap-3">
-            <div className="w-16 h-16 bg-slate-900 rounded-lg overflow-hidden shrink-0 flex items-center justify-center">
-              <img 
-                src={activeImage.url} 
-                alt={activeImage.label} 
-                className="w-full h-full object-cover"
-              />
-            </div>
-            <div className="min-w-0 flex-1">
-              <span className="text-xs font-bold text-[#17212B] block truncate">
-                {activeImage.label}
-              </span>
-              <span className="text-[10.5px] text-[#52616F] block mt-0.5">
-                Captured package image · {new Date(activeImage.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            </div>
-
+        {/* Captured Views Summary Card */}
+        <div className="bg-white border border-[#D9E1E8] rounded-xl p-3.5 shadow-card space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-[#17212B] uppercase tracking-wider flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-[#0F766E]" />
+              <span>Captured Package Views ({validImages.length})</span>
+            </span>
+            
             <button
               type="button"
-              onClick={handleRunOcr}
+              onClick={handleRunAllOcr}
               disabled={status === 'processing'}
-              className="bg-[#0F766E] hover:bg-[#0d645e] active:scale-95 text-white font-bold text-xs py-2 px-3.5 rounded-lg shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
+              className="bg-[#0F766E] hover:bg-[#0d645e] active:scale-95 text-white font-bold text-xs py-1.5 px-3 rounded-lg shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
             >
               {status === 'processing' ? (
                 <RotateCw className="w-3.5 h-3.5 animate-spin" />
@@ -182,18 +168,54 @@ export const OcrAnalysisScreen: React.FC = () => {
               )}
               <span>
                 {status === 'processing' 
-                  ? 'Extracting...' 
+                  ? 'Processing...' 
                   : status === 'failed' 
-                  ? 'Try Again' 
+                  ? 'Retry OCR' 
+                  : isOcrComplete 
+                  ? 'Re-run OCR' 
                   : 'Run OCR'}
               </span>
             </button>
           </div>
-        ) : (
-          <div className="p-4 bg-[#FEE2E2] border border-[#FECACA] rounded-xl text-xs text-[#B91C1C]">
-            No package images captured. Please return to Step 2 to capture a package.
-          </div>
-        )}
+
+          {/* Grid of captured thumbnails */}
+          {validImages.length > 0 ? (
+            <div className="grid grid-cols-4 gap-2 pt-1">
+              {validImages.map((img) => {
+                const imgRes = ocrResults.find(r => r.imageId === img.id);
+                const hasText = !!(imgRes && imgRes.text.trim().length > 0);
+                const isSelected = selectedTab === img.id;
+
+                return (
+                  <button
+                    key={img.id}
+                    type="button"
+                    onClick={() => setSelectedTab(img.id)}
+                    className={`relative rounded-lg overflow-hidden border p-1 text-left transition-all cursor-pointer ${
+                      isSelected 
+                        ? 'border-[#0F766E] ring-2 ring-[#0F766E]/30 bg-teal-50/40' 
+                        : 'border-[#D9E1E8] bg-[#F4F7FA]'
+                    }`}
+                  >
+                    <div className="w-full h-14 bg-slate-900 rounded overflow-hidden flex items-center justify-center">
+                      <img src={img.url} alt={img.label} className="w-full h-full object-cover" />
+                    </div>
+                    <span className="text-[10px] font-bold text-[#17212B] block truncate mt-1">
+                      {img.label || img.side}
+                    </span>
+                    <span className="text-[9px] block text-[#52616F]">
+                      {status === 'processing' ? 'Pending' : hasText ? '✓ Read' : 'Ready'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="p-3 bg-[#FEE2E2] border border-[#FECACA] rounded-lg text-xs text-[#B91C1C]">
+              No package images captured. Return to Step 2 to capture images.
+            </div>
+          )}
+        </div>
 
         {/* Status & Progress Notification Banner */}
         <div className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
@@ -214,14 +236,12 @@ export const OcrAnalysisScreen: React.FC = () => {
             <div className="flex items-center justify-between">
               <span className="font-bold block text-[11px] uppercase tracking-wider">
                 {status === 'processing'
-                  ? 'Extracting text from package...'
+                  ? 'Running OCR on Package Images...'
                   : status === 'success'
-                  ? '✓ OCR completed'
+                  ? '✓ Multi-Image OCR Completed'
                   : status === 'failed'
-                  ? 'OCR could not extract readable text'
-                  : status === 'requires_retake'
-                  ? 'Retake Required'
-                  : 'Ready for Extraction'}
+                  ? 'OCR Incomplete'
+                  : 'Ready for OCR'}
               </span>
               {status === 'processing' && progressPct > 0 && (
                 <span className="text-[10px] font-mono font-bold text-[#2563EB]">
@@ -234,19 +254,7 @@ export const OcrAnalysisScreen: React.FC = () => {
               {statusMessage}
             </p>
 
-            {status === 'failed' && (
-              <div className="mt-2 text-[10.5px] text-[#7F1D1D] bg-white/60 p-2 rounded border border-[#FECACA] space-y-1">
-                <span className="font-semibold block">Possible inspection issues:</span>
-                <ul className="list-disc pl-4 space-y-0.5">
-                  <li>Image is out of focus or blurred</li>
-                  <li>Harsh glare or reflection on shiny packaging</li>
-                  <li>Insufficient lighting or heavy shadows</li>
-                  <li>Declaration text is obscured or cropped</li>
-                </ul>
-              </div>
-            )}
-
-            {/* Progress bar during extraction */}
+            {/* Progress bar */}
             {status === 'processing' && (
               <div className="w-full bg-blue-200 h-1.5 rounded-full mt-2 overflow-hidden">
                 <div 
@@ -258,43 +266,109 @@ export const OcrAnalysisScreen: React.FC = () => {
           </div>
         </div>
 
-        {/* Real Extracted Text Display (Read-Only) */}
-        <div className="bg-white border border-[#D9E1E8] rounded-xl p-4 shadow-card space-y-2">
+        {/* View Tabs & OCR Output Card */}
+        <div className="bg-white border border-[#D9E1E8] rounded-xl p-4 shadow-card space-y-2.5">
           <div className="flex items-center justify-between">
             <label className="block font-bold text-[#17212B] uppercase tracking-wider text-[11px]">
-              EXTRACTED TEXT
+              Extracted OCR Text
             </label>
-            {rawText.length > 0 && (
+            {displayedText.length > 0 && (
               <span className="text-[10px] font-mono text-[#0F766E] bg-[#EBF8F7] px-2 py-0.5 rounded font-semibold">
-                {rawText.length} characters extracted
+                {displayedText.length} chars
               </span>
             )}
           </div>
 
+          {/* Tab selector */}
+          <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
+            <button
+              type="button"
+              onClick={() => setSelectedTab('all')}
+              className={`px-2.5 py-1 rounded-lg font-semibold text-[10.5px] shrink-0 border cursor-pointer ${
+                selectedTab === 'all'
+                  ? 'bg-[#12304A] text-white border-[#12304A]'
+                  : 'bg-[#F4F7FA] text-[#52616F] border-[#D9E1E8]'
+              }`}
+            >
+              All Views (Combined)
+            </button>
+            {validImages.map((img) => (
+              <button
+                key={img.id}
+                type="button"
+                onClick={() => setSelectedTab(img.id)}
+                className={`px-2.5 py-1 rounded-lg font-semibold text-[10.5px] shrink-0 border cursor-pointer ${
+                  selectedTab === img.id
+                    ? 'bg-[#12304A] text-white border-[#12304A]'
+                    : 'bg-[#F4F7FA] text-[#52616F] border-[#D9E1E8]'
+                }`}
+              >
+                {img.label || img.side}
+              </button>
+            ))}
+          </div>
+
+          {/* Raw Text Box */}
           <div 
-            className="w-full min-h-[110px] max-h-[180px] overflow-y-auto p-3 bg-[#F4F7FA] border border-[#D9E1E8] rounded-lg text-xs text-[#17212B] font-mono whitespace-pre-wrap leading-relaxed select-text"
+            className="w-full min-h-[110px] max-h-[170px] overflow-y-auto p-3 bg-[#F4F7FA] border border-[#D9E1E8] rounded-lg text-xs text-[#17212B] font-mono whitespace-pre-wrap leading-relaxed select-text"
           >
             {status === 'processing' ? (
               <span className="text-[#94A3B8] italic flex items-center gap-1.5">
                 <RotateCw className="w-3.5 h-3.5 animate-spin" />
-                Processing OCR worker and reading characters...
+                Reading characters from package image views...
               </span>
             ) : isOcrComplete ? (
-              rawText
+              displayedText || <span className="text-[#94A3B8] italic">No text recognized in this specific view.</span>
             ) : status === 'failed' ? (
               <span className="text-[#B91C1C] italic">
-                No readable text extracted. Please retake the photo or adjust lighting and tap "Try Again".
+                No readable text extracted. Tap "Retry OCR" above to try again.
               </span>
             ) : (
               <span className="text-[#94A3B8] italic">
-                No text extracted yet. Tap "Run OCR" above to extract statutory declarations directly from the package image.
+                Tap "Run OCR" above to extract statutory declarations from all package views.
               </span>
             )}
           </div>
 
-          <p className="text-[10.5px] text-[#52616F] leading-relaxed">
-            Extracted text will be structured into applicable Legal Metrology declarations in the next step.
-          </p>
+          {/* Extracted Statutory Declarations Provenance Preview */}
+          {isOcrComplete && extractedDeclarations.length > 0 && (
+            <div className="pt-2 border-t border-[#D9E1E8]/60 space-y-1.5">
+              <span className="text-[10.5px] font-bold text-[#17212B] uppercase tracking-wider block">
+                Detected Statutory Declarations with Source View
+              </span>
+              <div className="max-h-[140px] overflow-y-auto space-y-1 pr-1">
+                {extractedDeclarations.map((decl) => {
+                  const isDetected = decl.status === 'detected' && decl.detectedValue && !decl.detectedValue.includes('Not detected');
+                  return (
+                    <div 
+                      key={decl.id}
+                      className="p-1.5 bg-[#F4F7FA] rounded border border-[#D9E1E8] flex items-center justify-between text-[11px]"
+                    >
+                      <div className="min-w-0 flex-1 pr-2">
+                        <span className="font-semibold text-[#12304A] block truncate">
+                          {decl.fieldName}
+                        </span>
+                        <span className="text-[10px] text-[#52616F] truncate block">
+                          {decl.detectedValue}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-[9.5px] font-bold bg-[#E6F4F1] text-[#0F766E] px-1.5 py-0.5 rounded capitalize">
+                          {decl.sideFound ? decl.sideFound.replace(/_/g, ' ') : 'Package'}
+                        </span>
+                        <span className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded ${
+                          isDetected ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'
+                        }`}>
+                          {isDetected ? 'Detected' : 'Missing'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
         </div>
 
       </div>
