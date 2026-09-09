@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowRight, Building, MapPin, FileText, AlertCircle, Shield, Briefcase } from 'lucide-react';
+import { ArrowRight, Building, FileText, AlertCircle, Shield, Briefcase } from 'lucide-react';
 import { useInspection } from '../../context/InspectionContext';
 import { PremisesType, InspectionPurpose } from '../../types';
 
@@ -9,7 +9,6 @@ export const InspectionSetup: React.FC = () => {
   const [premisesName, setPremisesName] = useState<string>(currentInspection.premisesName || '');
   const [premisesType, setPremisesType] = useState<PremisesType>(currentInspection.premisesType || 'Retail Store');
   const [purpose, setPurpose] = useState<InspectionPurpose>(currentInspection.inspectionPurpose || 'Routine Market Surveillance');
-  const [address, setAddress] = useState<string>(currentInspection.premisesAddress || '');
   const [remarks, setRemarks] = useState<string>(currentInspection.officerRemarks || '');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -26,7 +25,7 @@ export const InspectionSetup: React.FC = () => {
     updatePremises(
       trimmedName,
       premisesType,
-      address.trim(),
+      '',
       remarks.trim(),
       purpose
     );
@@ -48,7 +47,7 @@ export const InspectionSetup: React.FC = () => {
           </div>
           <h1 className="text-xl font-bold text-[#12304A]">Start New Inspection</h1>
           <p className="text-xs text-[#52616F] mt-1 leading-relaxed">
-            Capture the inspection location and premises details before examining the packaged commodity.
+            Record premises and establishment details before verifying GPS location and examining packaged commodities.
           </p>
         </div>
 
@@ -63,7 +62,7 @@ export const InspectionSetup: React.FC = () => {
         {/* Card: Premises Details */}
         <div className="bg-white border border-[#D9E1E8] rounded-xl p-4 shadow-card space-y-3.5">
           
-          {/* Inspection Purpose */}
+          {/* 1. Inspection Purpose */}
           <div>
             <label 
               htmlFor="inspection-purpose"
@@ -87,7 +86,7 @@ export const InspectionSetup: React.FC = () => {
             </div>
           </div>
 
-          {/* Premises Name (Required) */}
+          {/* 2. Premises / Establishment Name (Required) */}
           <div>
             <label 
               htmlFor="premises-name"
@@ -109,7 +108,7 @@ export const InspectionSetup: React.FC = () => {
             </div>
           </div>
 
-          {/* Premises Type */}
+          {/* 3. Premises Type */}
           <div>
             <label 
               htmlFor="premises-type"
@@ -133,31 +132,7 @@ export const InspectionSetup: React.FC = () => {
             </select>
           </div>
 
-          {/* Address / Location */}
-          <div>
-            <label 
-              htmlFor="premises-address"
-              className="block font-semibold text-[#17212B] uppercase tracking-wider text-[11px] mb-1.5"
-            >
-              Address / Locality
-            </label>
-            <div className="relative">
-              <MapPin className="w-4 h-4 text-[#52616F] absolute left-3 top-3 pointer-events-none" />
-              <input
-                id="premises-address"
-                type="text"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder="e.g. Shop 12, Commercial Complex, Sector 18"
-                className="w-full pl-9 pr-3 py-2.5 bg-[#F4F7FA] border border-[#D9E1E8] rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#0F766E] text-xs text-[#17212B] font-medium"
-              />
-            </div>
-            <p className="text-[10px] text-[#52616F] mt-1">
-              Physical address of the establishment being inspected.
-            </p>
-          </div>
-
-          {/* Officer Remarks */}
+          {/* 4. Officer Remarks / Case Notes */}
           <div>
             <label 
               htmlFor="officer-remarks"
@@ -186,8 +161,7 @@ export const InspectionSetup: React.FC = () => {
           type="submit"
           className="w-full bg-[#12304A] hover:bg-[#0B2239] active:scale-[0.98] text-white font-bold text-xs py-3.5 px-4 rounded-xl shadow-card transition-all flex items-center justify-center gap-2 cursor-pointer"
         >
-          <span>Continue to Location</span>
-          <ArrowRight className="w-4 h-4" />
+          <span>Continue to Location →</span>
         </button>
       </div>
 
