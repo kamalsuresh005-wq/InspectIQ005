@@ -37,7 +37,7 @@ export interface IOcrService {
  */
 export async function preprocessImageForOcr(imageSource: string): Promise<string> {
   return new Promise((resolve) => {
-    // If running in an environment without DOM canvas, return original
+    // If running in a non-browser environment, return original
     if (typeof window === 'undefined' || typeof document === 'undefined') {
       return resolve(imageSource);
     }
@@ -54,19 +54,18 @@ export async function preprocessImageForOcr(imageSource: string): Promise<string
           return resolve(imageSource);
         }
 
-        // Target an optimal resolution for OCR (min 1000px on smallest side, max 2400px on largest side)
-        let scale = 1.0;
+        // On mobile devices, restrict max dimensions to 1600px to prevent browser canvas OOM
         const maxDim = Math.max(naturalWidth, naturalHeight);
-        const minDim = Math.min(naturalWidth, naturalHeight);
+        let scale = 1.0;
 
-        if (minDim < 800) {
-          scale = Math.min(2.0, 1000 / minDim);
-        } else if (maxDim > 2500) {
-          scale = 2400 / maxDim;
+        if (maxDim > 1600) {
+          scale = 1600 / maxDim;
+        } else if (maxDim < 600) {
+          scale = Math.min(2.0, 900 / maxDim);
         }
 
-        const targetWidth = Math.round(naturalWidth * scale);
-        const targetHeight = Math.round(naturalHeight * scale);
+        const targetWidth = Math.max(300, Math.round(naturalWidth * scale));
+        const targetHeight = Math.max(300, Math.round(naturalHeight * scale));
 
         const canvas = document.createElement('canvas');
         canvas.width = targetWidth;
@@ -80,15 +79,13 @@ export async function preprocessImageForOcr(imageSource: string): Promise<string
         // Draw scaled image
         ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
 
-        // Get pixel data for contrast enhancement and grayscale
+        // Pixel-level contrast stretch & grayscale
         const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight);
         const data = imageData.data;
 
-        // Grayscale conversion & dynamic contrast stretch
         let minLum = 255;
         let maxLum = 0;
 
-        // Pass 1: compute luminance and min/max bounds
         for (let i = 0; i < data.length; i += 4) {
           const lum = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
           if (lum < minLum) minLum = lum;
@@ -97,28 +94,26 @@ export async function preprocessImageForOcr(imageSource: string): Promise<string
 
         const lumRange = Math.max(1, maxLum - minLum);
 
-        // Pass 2: contrast stretch and unsharp emphasis
         for (let i = 0; i < data.length; i += 4) {
           const originalLum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-          // Normalized contrast stretch [0 - 255]
           const stretched = Math.min(255, Math.max(0, ((originalLum - minLum) / lumRange) * 255));
-          
           data[i] = stretched;
           data[i + 1] = stretched;
           data[i + 2] = stretched;
-          // preserve alpha
         }
 
         ctx.putImageData(imageData, 0, 0);
-        const processedDataUrl = canvas.toDataURL('image/png');
+        // Use JPEG at 0.85 for mobile speed and lower memory footprint
+        const processedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
         resolve(processedDataUrl);
       } catch (err) {
-        // In case canvas is tainted or any error occurs, safely fall back to original image
+        console.warn('[OCR Preprocess Error, using original]', err);
         resolve(imageSource);
       }
     };
 
-    img.onerror = () => {
+    img.onerror = (err) => {
+      console.warn('[OCR Preprocess Image Load Error]', err);
       resolve(imageSource);
     };
 
@@ -132,7 +127,6 @@ export class TesseractOcrService implements IOcrService {
   private initPromise: Promise<Worker> | null = null;
 
   public isConfigured(): boolean {
-    // True: Real client-side Tesseract.js WebAssembly worker is supported and ready
     return true;
   }
 
@@ -147,17 +141,48 @@ export class TesseractOcrService implements IOcrService {
 
     this.isInitializing = true;
     this.initPromise = (async () => {
-      try {
-        const worker = await createWorker('eng', 1, {
+      const isBrowser = typeof window !== 'undefined' && typeof window.location !== 'undefined';
+      const origin = isBrowser ? window.location.origin : '';
+
+      // Configuration Strategy:
+      // Primary: Use bundled assets hosted directly on same origin under /tesseract/
+      // Fallback: Use reliable public CDN with fast 4.0.0_fast model
+      const primaryOptions = isBrowser ? {
+        workerPath: `${origin}/tesseract/worker.min.js`,
+        corePath: `${origin}/tesseract/tesseract-core-lstm.wasm.js`,
+        langPath: `${origin}/tesseract/4.0.0_fast`,
+        gzip: true,
+      } : {};
+
+      const fallbackOptions = isBrowser ? {
+        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@v7.0.0/dist/worker.min.js',
+        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@v7.0.0/tesseract-core-lstm.wasm.js',
+        langPath: 'https://tessdata.projectnaptha.com/4.0.0_fast',
+        gzip: true,
+      } : {};
+
+      const createWorkerWithTimeout = async (opts: any, label: string): Promise<Worker> => {
+        console.log(`[OCR] Initializing worker using ${label}...`);
+        
+        let timeoutId: any;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error(`Worker initialization timed out after 20s using ${label}`));
+          }, 20000);
+        });
+
+        const workerPromise = createWorker('eng', 1, {
+          ...opts,
           logger: (m: any) => {
             if (onProgress && m) {
               const progressPct = Math.round((m.progress || 0) * 100);
               let statusLabel = m.status || 'Processing';
-              if (m.status === 'loading tesseract core') statusLabel = 'Loading OCR core...';
+              if (m.status === 'loading tesseract core') statusLabel = 'Loading OCR core engine...';
               else if (m.status === 'initializing tesseract') statusLabel = 'Initializing OCR engine...';
-              else if (m.status === 'loading language traineddata') statusLabel = 'Loading language model...';
+              else if (m.status === 'loading language traineddata') statusLabel = 'Loading Legal Metrology language model...';
               else if (m.status === 'recognizing text') statusLabel = 'Recognizing package text...';
 
+              console.log(`[OCR Progress] ${statusLabel} (${progressPct}%)`);
               onProgress({
                 status: statusLabel,
                 progress: progressPct,
@@ -166,13 +191,42 @@ export class TesseractOcrService implements IOcrService {
           },
         });
 
+        try {
+          const res = await Promise.race([workerPromise, timeoutPromise]);
+          clearTimeout(timeoutId);
+          return res;
+        } catch (err) {
+          clearTimeout(timeoutId);
+          throw err;
+        }
+      };
+
+      try {
+        console.log('[OCR] Attempting worker initialization with local bundled assets...');
+        const worker = await createWorkerWithTimeout(primaryOptions, 'Local Bundle');
+        console.log('[OCR] Worker initialized successfully via local assets.');
         this.workerInstance = worker;
         this.isInitializing = false;
         return worker;
-      } catch (err) {
-        this.isInitializing = false;
-        this.initPromise = null;
-        throw err;
+      } catch (primaryErr) {
+        console.warn('[OCR] Local asset worker init failed, attempting CDN fallback...', primaryErr);
+
+        if (onProgress) {
+          onProgress({ status: 'Connecting to OCR fallback service...', progress: 20 });
+        }
+
+        try {
+          const worker = await createWorkerWithTimeout(fallbackOptions, 'CDN Fallback');
+          console.log('[OCR] Worker initialized successfully via CDN fallback.');
+          this.workerInstance = worker;
+          this.isInitializing = false;
+          return worker;
+        } catch (cdnErr) {
+          this.isInitializing = false;
+          this.initPromise = null;
+          console.error('[OCR ERROR] All worker initialization attempts failed:', cdnErr);
+          throw new Error('Failed to initialize OCR engine on device. Please ensure internet connectivity and reload.');
+        }
       }
     })();
 
@@ -183,7 +237,10 @@ export class TesseractOcrService implements IOcrService {
     imageUrlOrBase64: string,
     onProgress?: (update: OcrProgressUpdate) => void
   ): Promise<OcrExtractionResult> {
+    console.log('[OCR] extractText called');
+
     if (!imageUrlOrBase64 || imageUrlOrBase64.trim() === '') {
+      console.warn('[OCR] No image provided');
       return {
         status: 'requires_retake',
         rawText: '',
@@ -192,6 +249,7 @@ export class TesseractOcrService implements IOcrService {
       };
     }
 
+    console.log('[OCR] Image received, length:', imageUrlOrBase64.length);
     const startTime = Date.now();
 
     try {
@@ -199,24 +257,42 @@ export class TesseractOcrService implements IOcrService {
         onProgress({ status: 'Preprocessing package image...', progress: 5 });
       }
 
-      // 1. Preprocess the package image (contrast stretch & grayscale)
+      // 1. Preprocess image
+      console.log('[OCR] Image processing started');
       const preprocessedImage = await preprocessImageForOcr(imageUrlOrBase64);
+      console.log('[OCR] Image preprocessing completed, ready for recognition');
 
       if (onProgress) {
-        onProgress({ status: 'Initializing Tesseract OCR worker...', progress: 15 });
+        onProgress({ status: 'Initializing OCR engine...', progress: 15 });
       }
 
-      // 2. Obtain or initialize the Tesseract.js worker
+      // 2. Initialize worker
+      console.log('[OCR] Worker initialization started');
       const worker = await this.getWorker(onProgress);
+      console.log('[OCR] Worker initialized and ready for recognize()');
 
       if (onProgress) {
-        onProgress({ status: 'Extracting printed text from package...', progress: 40 });
+        onProgress({ status: 'Extracting text from package...', progress: 35 });
       }
 
-      // 3. Execute real Tesseract recognition
-      const recognitionResult = await worker.recognize(preprocessedImage);
-      const rawText = (recognitionResult.data?.text || '').trim();
+      // 3. Execute OCR with 30s timeout guard
+      let recogTimeout: any;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        recogTimeout = setTimeout(() => {
+          reject(new Error('OCR recognition timed out after 30 seconds.'));
+        }, 30000);
+      });
+
+      console.log('[OCR] Invoking worker.recognize()...');
+      const recognitionResult: any = await Promise.race([
+        worker.recognize(preprocessedImage),
+        timeoutPromise,
+      ]);
+      clearTimeout(recogTimeout);
+
+      const rawText = (recognitionResult?.data?.text || '').trim();
       const processingTimeMs = Date.now() - startTime;
+      console.log(`[OCR] OCR completed in ${processingTimeMs}ms. Text length: ${rawText.length}`);
 
       if (!rawText || rawText.length === 0) {
         return {
@@ -228,18 +304,27 @@ export class TesseractOcrService implements IOcrService {
         };
       }
 
-      // 4. Structure extracted raw text into declarations
+      // 4. Structure declarations
       const structuredDeclarations = this.structureDeclarationsFromText(rawText);
 
       return {
         status: 'success',
         rawText,
-        message: 'OCR completed successfully.',
+        message: '✓ OCR completed',
         processingTimeMs,
         structuredDeclarations,
       };
     } catch (err: any) {
-      // In case worker encounters an issue, reset so subsequent runs can re-initialize
+      console.error('[OCR ERROR]', err);
+
+      // Reset instance on error so officer can Try Again cleanly
+      try {
+        if (this.workerInstance) {
+          await this.workerInstance.terminate();
+        }
+      } catch (termErr) {
+        // ignore
+      }
       this.workerInstance = null;
       this.initPromise = null;
       this.isInitializing = false;

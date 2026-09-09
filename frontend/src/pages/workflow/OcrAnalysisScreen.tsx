@@ -41,9 +41,10 @@ export const OcrAnalysisScreen: React.FC = () => {
       return;
     }
 
+    console.log('[OCR UI] Run OCR clicked. Image ID:', activeImage.id, 'Side:', activeImage.side);
     setStatus('processing');
     setProgressPct(5);
-    setStatusMessage('Extracting text from package...');
+    setStatusMessage('Initializing OCR...');
 
     try {
       const result = await activeOcrService.extractText(
@@ -54,6 +55,7 @@ export const OcrAnalysisScreen: React.FC = () => {
         }
       );
 
+      console.log('[OCR UI] extractText completed with status:', result.status, 'Message:', result.message);
       setStatus(result.status);
       setStatusMessage(result.message);
 
@@ -65,9 +67,10 @@ export const OcrAnalysisScreen: React.FC = () => {
         updateRawOcrText('', 'failed');
       }
     } catch (err: any) {
+      console.error('[OCR UI ERROR]', err);
       setStatus('failed');
       setStatusMessage(
-        err?.message || 'OCR could not extract readable text. Image may be blurry or poorly lit.'
+        err?.message || 'OCR could not be completed. Please ensure label is clear and try again.'
       );
       updateRawOcrText('', 'failed');
     }
